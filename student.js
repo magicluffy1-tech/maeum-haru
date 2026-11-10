@@ -13,7 +13,8 @@ function renderStudent(){
       <div class="stat"><div class="k">마음이 맑아진 날</div><div class="v">☀️ ${ups}</div><div class="k">아침보다 저녁이 더 맑았던 날</div></div>
     </div>
     <section class="card"><h2>${fmtDate(t)} · 오늘의 마음</h2>${todayHTML(todayE, di >= 0)}</section>
-    <section class="card"><h2>나의 마음 하루 30일</h2>
+    <section class="card" id="counsel-card"><h2>💬 상담 신청</h2>${counselHTML(todayE)}</section>
+    <section class="card"><h2 style="display:flex;align-items:center;gap:8px">나의 마음 하루 30일 <button class="btn sm" data-act="print" style="margin-left:auto;font-family:Pretendard">📄 PDF 저장·인쇄</button></h2>
       ${calendarHTML(cls, byDate)}
       <div class="legend"><span>칸 = 아침 → 저녁 마음 날씨</span><span>▲▼ 마음 온도 변화</span><span>🍬 미션 성공</span><span>날짜를 누르면 자세히 볼 수 있어요</span></div>
     </section></main>`;
@@ -31,7 +32,9 @@ function todayHTML(e, inPeriod){
   if(!hasAm || u.editAm) h += weatherForm('am', e);
   else h += `<div class="summary" style="background:${WEATHER[e.am_weather].c}"><span class="e">${WEATHER[e.am_weather].e}</span>
       <div class="t"><b>🌅 아침 · ${WEATHER[e.am_weather].n} ${tempOf(e,'am')}°</b>${e.am_reason ? `<span>“${esc(e.am_reason)}”</span>` : ''}</div>
-      ${!hasPm ? '<button class="btn sm" data-act="edit-am">고치기</button>' : ''}</div>`;
+      ${!hasPm ? '<button class="btn sm" data-act="edit-am">고치기</button>' : ''}</div>
+      ${e.am_weather >= 4 && !(S.counsels||[]).some(c => c.entry_date === todayKST() && c.status !== 'canceled')
+        ? `<div class="note" style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:1">마음이 무거운 아침이네요. 선생님과 이야기 나누고 싶다면 상담을 신청할 수 있어요.</span><button class="btn sm primary" data-act="counsel-open">💬 상담 신청</button></div>` : ''}`;
   h += `</div>`;
   // 미션
   if(hasAm && e.mission_id && !u.editAm){
@@ -99,7 +102,7 @@ async function onWeatherSubmit(f){
 }
 
 /* ===================================================================== 학생 이벤트 */
-async function startApp(){ S.entries = await API.myEntries(S.me.id); renderStudent(); }
+async function startApp(){ [S.entries, S.counsels] = await Promise.all([API.myEntries(S.me.id), API.myCounsels(S.me.id).catch(() => [])]); renderStudent(); }
 
 document.addEventListener('click', ev => {
   const wb = ev.target.closest('.wbtn');
@@ -126,4 +129,56 @@ document.addEventListener('submit', async ev => {
     try{ await API.setPledge(f.pledge.value.trim()); S.ui.pledgeOpen = false; S.entries = await API.myEntries(S.me.id); renderStudent(); toast('다짐을 저장했어요! 종례 시간에 확인해요 💪'); }
     catch(e){ toast(e.message); }
   }
+});
+
+/* ===================================================================== 상담 신청 */
+function counselHTML(){
+  const u = S.ui, f = u.cf || (u.cf = {target:'homeroom', urgency:'week', category:'', time:''});
+  const opt = (k, v, label) => `<button type="button" class="opt ${f[k]===v?'on':''}" data-opt="${k}" data-v="${esc(v)}">${label}</button>`;
+  const list = (S.counsels || []).filter(c => c.status !== 'canceled').slice(0, 6);
+  const form = u.counselOpen ? `<form id="counsel-form">
+      <div class="olbl">누구와 이야기하고 싶나요?</div><div class="optrow">${Object.entries(C_TARGET).map(([k,v]) => opt('target', k, v)).join('')}</div>
+      <div class="olbl">어떤 이야기인가요?</div><div class="optrow">${C_CATS.map(c => opt('category', c, c)).join('')}</div>
+      <div class="olbl">언제 만나고 싶나요?</div><div class="optrow">${Object.entries(C_URGENCY).map(([k,v]) => opt('urgency', k, v)).join('')}</div>
+      <div class="olbl">편한 시간</div><div class="optrow">${C_TIMES.map(c => opt('time', c, c)).join('')}</div>
+      <textarea name="content" maxlength="500" placeholder="선생님께 미리 전하고 싶은 말이 있으면 적어 주세요. (비워 둬도 괜찮아요)"></textarea>
+      <p class="muted" style="font-size:12px;margin:-4px 0 8px">🔒 신청 내용은 선생님들만 볼 수 있어요. 지금 많이 힘들다면 바로 선생님께 직접 말하거나 청소년상담전화 <b>1388</b>에 연락할 수 있어요.</p>
+      <div class="err"></div>
+      <div style="display:flex;gap:8px"><button class="btn primary" style="flex:1">상담 신청하기</button><button type="button" class="btn" data-act="counsel-close">닫기</button></div>
+    </form>`
+    : `<button class="btn primary big" data-act="counsel-open">💬 선생님과 이야기하고 싶어요</button>`;
+  return form + (list.length ? `<div style="margin-top:14px;display:flex;align-items:center"><b style="font-size:14px">내 신청</b>
+      <button class="btn ghost sm" data-act="counsel-refresh" style="margin-left:auto">🔄 새로고침</button></div>
+    ${list.map(c => `<div class="creq">
+      <div class="hd"><span class="cst ${c.status}">${C_STATUS[c.status]}</span><b>${C_TARGET[c.target]}</b><span class="muted">${esc(c.category)} · ${C_URGENCY[c.urgency]}${c.preferred_time ? ' · '+esc(c.preferred_time) : ''}</span>
+        <span class="muted" style="margin-left:auto">${md(c.entry_date)}</span></div>
+      ${c.content ? `<p class="ct">${esc(c.content)}</p>` : ''}
+      ${c.teacher_note ? `<div class="reply">💌 선생님: ${esc(c.teacher_note)}</div>` : ''}
+      ${c.status === 'new' ? `<div style="text-align:right;margin-top:6px"><button class="btn ghost sm" data-act="counsel-cancel" data-id="${c.id}">신청 취소</button></div>` : ''}
+    </div>`).join('')}` : '');
+}
+function rerenderCounsel(){ const el = $('#counsel-card'); if(el) el.innerHTML = '<h2>💬 상담 신청</h2>' + counselHTML(); }
+
+document.addEventListener('click', async ev => {
+  const o = ev.target.closest('.opt[data-opt]');
+  if(o){ const k = o.dataset.opt; S.ui.cf[k] = o.dataset.v; $$(`.opt[data-opt="${k}"]`).forEach(b => b.classList.toggle('on', b === o)); return; }
+  const a = ev.target.closest('[data-act]'); if(!a) return;
+  const act = a.dataset.act;
+  if(act === 'counsel-open'){ S.ui.counselOpen = true; S.ui.cf = null; rerenderCounsel(); return $('#counsel-card').scrollIntoView({behavior:'smooth', block:'start'}); }
+  if(act === 'counsel-close'){ S.ui.counselOpen = false; return rerenderCounsel(); }
+  if(act === 'counsel-refresh'){ S.counsels = await API.myCounsels(S.me.id); rerenderCounsel(); return toast('새로 불러왔어요'); }
+  if(act === 'counsel-cancel'){ try{ await API.cancelCounsel(+a.dataset.id); S.counsels = await API.myCounsels(S.me.id); rerenderCounsel(); toast('신청을 취소했어요'); }catch(e){ toast(e.message); } return; }
+  if(act === 'print') return printReport(S.me, S.entries, classOf(S.me.class_id));
+});
+document.addEventListener('submit', async ev => {
+  const f = ev.target; if(f.getAttribute('id') !== 'counsel-form') return;
+  ev.preventDefault();
+  const c = S.ui.cf, err = $('.err', f);
+  if(!c.category){ err.textContent = '어떤 이야기인지 하나 골라 주세요.'; return; }
+  const btn = f.querySelector('button.primary'); btn.disabled = true;
+  try{
+    await API.requestCounsel({target:c.target, category:c.category, urgency:c.urgency, time:c.time || null, content:f.elements.content.value.trim() || null});
+    S.ui.counselOpen = false; S.counsels = await API.myCounsels(S.me.id); renderStudent();
+    toast(`${C_TARGET[c.target]}께 상담을 신청했어요 💌`);
+  }catch(e){ err.textContent = e.message; btn.disabled = false; }
 });

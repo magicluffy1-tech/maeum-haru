@@ -9,8 +9,8 @@ async function loadPeople(){
   const mine = people.find(p => p.id === S.me?.id); if(mine) S.me = {...S.me, ...mine};
 }
 async function loadTeacher(){
-  const [, en] = await Promise.all([loadPeople(), API.allEntries()]);
-  S.t.entries = en; reindex();
+  const [, en, cs] = await Promise.all([loadPeople(), API.allEntries(), API.allCounsels().catch(() => [])]);
+  S.t.entries = en; S.t.counsels = cs; reindex();
 }
 function reindex(){
   const idx = {};
@@ -30,24 +30,25 @@ function concernsFor(s, D){
   if(last.length === 3 && last.every(x => (x.pm_weather || x.am_weather) >= 4)) out.push('흐림 3일 연속');
   const txt = [e?.am_reason, e?.pm_reason, e?.reflection].filter(Boolean).join(' ');
   if(CONCERN_WORDS.some(w => txt.includes(w))) out.push('이유 살펴보기');
+  if((S.t.counsels||[]).some(c => c.student_id === s.id && ['new','seen'].includes(c.status))) out.push('상담 신청');
   return out;
 }
 
 function renderTeacher(){
-  const pc = (S.t.pending || []).length;
-  const tabs = [['today','📊 오늘 한눈에'],['trend','📈 기간 추이'],['approve',`✅ 가입 승인${pc ? ` <span class="badge" style="background:var(--down);color:#fff">${pc}</span>` : ''}`],['missions','🍬 미션'],['settings','⚙️ 학급 설정']];
+  const pc = (S.t.pending || []).length, cn = (S.t.counsels || []).filter(c => c.status === 'new').length;
+  const tabs = [['today','📊 오늘 한눈에'],['trend','📈 기간 추이'],['approve',`✅ 가입 승인${pc ? ` <span class="badge" style="background:var(--down);color:#fff">${pc}</span>` : ''}`],['counsel',`💬 상담 신청${cn ? ` <span class="badge" style="background:var(--down);color:#fff">${cn}</span>` : ''}`],['missions','🍬 미션'],['settings','⚙️ 학급 설정']];
   const T = S.t;
   app.innerHTML = topbar(DEMO ? '' : '<span class="live" id="live">실시간</span>') + `
     <nav style="border-bottom:1px solid var(--line);background:var(--paper)"><div class="tabs">${tabs.map(([k,v]) => `<button class="${T.tab===k?'on':''}" data-act="tab" data-v="${k}">${v}</button>`).join('')}</div></nav>
     <div class="twrap">
-      ${!['settings','approve'].includes(T.tab) ? `<div class="filters">
+      ${!['settings','approve','counsel'].includes(T.tab) ? `<div class="filters">
         <div class="chips">${[['all','전체'], ...S.classes.map(c => [c.id, c.name])].map(([k,v]) => `<button class="chip ${T.classId===k?'on':''}" data-act="cls" data-v="${k}">${v}</button>`).join('')}</div>
         ${T.tab === 'today' ? `<span style="margin-left:auto;display:flex;gap:6px;align-items:center">
           <button class="btn sm" data-act="day" data-v="-1">◀</button><input type="date" class="inp" id="tdate" value="${T.date}"><button class="btn sm" data-act="day" data-v="1">▶</button>
           <button class="btn sm" data-act="day" data-v="0">오늘</button></span>` : ''}
         <button class="btn sm" data-act="refresh" title="새로 불러오기">🔄</button>
       </div>` : ''}
-      <div id="tbody">${({today:tToday, trend:tTrend, approve:tApprove, missions:tMissions, settings:tSettings})[T.tab]()}</div>
+      <div id="tbody">${({today:tToday, trend:tTrend, approve:tApprove, counsel:tCounsel, missions:tMissions, settings:tSettings})[T.tab]()}</div>
     </div>`;
 }
 
@@ -152,6 +153,43 @@ function tMissions(){
       <button class="btn primary">추가</button></form></div>`;
 }
 
+function counselCard(c, withName=true){
+  const s = (S.t.people||[]).find(p => p.id === c.student_id);
+  const e = S.t.idx[c.student_id]?.[c.entry_date];
+  return `<div class="creq ${c.status}">
+    <div class="hd"><span class="cst ${c.status}">${{new:'새 신청', seen:'확인함', done:'상담 완료', canceled:'학생이 취소'}[c.status]}</span>
+      ${withName ? `<b style="cursor:pointer" data-act="student" data-sid="${c.student_id}">${s ? `${classOf(s.class_id)?.name||''} ${s.number}번 ${esc(s.name)}` : '알 수 없음'}</b>` : ''}
+      <span>→ <b>${C_TARGET[c.target]}</b></span>
+      <span class="${c.urgency==='today'?'urg-today':'muted'}">${C_URGENCY[c.urgency]}</span>
+      <span class="muted">${esc(c.category)}${c.preferred_time ? ' · '+esc(c.preferred_time) : ''}</span>
+      <span class="muted" style="margin-left:auto">${fmtTime(c.created_at)}</span></div>
+    ${e?.am_weather ? `<div class="muted" style="font-size:12px;margin-top:4px">그날 아침 마음: ${WEATHER[e.am_weather].e} ${WEATHER[e.am_weather].n} ${tempOf(e,'am')}°${e.am_reason ? ' · “'+esc(e.am_reason)+'”' : ''}</div>` : ''}
+    ${c.content ? `<p class="ct">${esc(c.content)}</p>` : '<p class="ct muted">(남긴 말 없음)</p>'}
+    ${c.status === 'canceled' ? '' : `<form class="cform" data-id="${c.id}" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      <input class="inp" name="note" maxlength="300" value="${esc(c.teacher_note||'')}" placeholder="학생에게 남길 말 (예: 목요일 점심에 상담실에서 만나요)" style="flex:1;min-width:220px">
+      ${c.status === 'new' ? `<button class="btn sm" name="st" value="seen">확인함</button>` : ''}
+      ${c.status !== 'done' ? `<button class="btn sm primary" name="st" value="done">상담 완료</button>` : `<button class="btn sm" name="st" value="done">말 저장</button><button class="btn sm ghost" name="st" value="seen">완료 취소</button>`}
+    </form>`}
+  </div>`;
+}
+function tCounsel(){
+  const T = S.t, f = T.cfilter || (T.cfilter = {target:'all', status:'open'});
+  const ids = new Set(tStudents().map(s => s.id));
+  const list = (T.counsels||[]).filter(c => (T.classId === 'all' || ids.has(c.student_id))
+    && (f.target === 'all' || c.target === f.target)
+    && (f.status === 'all' || (f.status === 'open' ? ['new','seen'].includes(c.status) : c.status === f.status)));
+  const chip = (k, v, label) => `<button class="chip ${f[k]===v?'on':''}" data-act="cfilter" data-k="${k}" data-v="${v}">${label}</button>`;
+  return `<div class="filters" style="margin-bottom:4px">
+      <div class="chips">${[['all','전체'], ...S.classes.map(c => [c.id, c.name])].map(([k,v]) => `<button class="chip ${T.classId===k?'on':''}" data-act="cls" data-v="${k}">${v}</button>`).join('')}</div>
+      <button class="btn sm" data-act="refresh" title="새로 불러오기" style="margin-left:auto">🔄</button></div>
+    <div class="filters" style="margin-top:8px">
+      <div class="chips">${chip('target','all','모든 대상')}${chip('target','homeroom','담임 선생님')}${chip('target','counselor','상담 선생님')}</div>
+      <div class="chips" style="margin-left:auto">${chip('status','open','진행 중')}${chip('status','new','새 신청')}${chip('status','done','완료')}${chip('status','all','전체')}</div></div>
+    <div class="card"><h2>💬 상담 신청 <span class="muted" style="font-size:14px;font-family:Pretendard">${list.length}건</span></h2>
+      ${list.length ? list.map(c => counselCard(c)).join('') : '<p class="muted">해당하는 상담 신청이 없어요.</p>'}
+      <p class="muted" style="font-size:12px;margin:12px 0 0">'확인함'을 누르면 학생 화면에 "선생님이 확인했어요"로 보여요. 남긴 말은 학생이 볼 수 있으니, 상담 내용 기록은 학교 상담 기록 양식에 따로 남겨 주세요.</p></div>`;
+}
+
 function tApprove(){
   const pend = S.t.pending || [];
   const ps = pend.filter(p => p.role === 'student').sort((a,b) => (a.class_id||'').localeCompare(b.class_id||'') || a.number - b.number);
@@ -225,7 +263,9 @@ function openStudent(sid, sel=null){
   const chs = es.map(change).filter(Boolean);
   const doneN = es.filter(e => e.mission_result==='done').length;
   const recent = sel || [...days].reverse().find(d => m[d]) || days[days.length-1];
-  openModal(`<h3>${esc(s.name)} <span class="muted" style="font-size:16px;font-family:Pretendard">${cls.name} ${s.number}번</span></h3>
+  const cs = (S.t.counsels||[]).filter(c => c.student_id === sid);
+  openModal(`<h3 style="display:flex;align-items:center;gap:8px;padding-right:40px">${esc(s.name)} <span class="muted" style="font-size:16px;font-family:Pretendard">${cls.name} ${s.number}번</span>
+      <button class="btn sm" data-act="print-student" data-sid="${sid}" style="margin-left:auto;font-family:Pretendard">📄 PDF 저장·인쇄</button></h3>
     <div class="sd-stats">
       <div class="kpi"><div class="k">기록한 날</div><div class="v">${es.filter(e=>e.am_weather||e.pm_weather).length} / ${days.length}</div></div>
       <div class="kpi"><div class="k">평균 온도 (아침→저녁)</div><div class="v">${avg(es.map(e=>tempOf(e,'am')).filter(v=>v!=null)) ?? '–'}° → ${avg(es.map(e=>tempOf(e,'pm')).filter(v=>v!=null)) ?? '–'}°</div></div>
@@ -243,6 +283,7 @@ function openStudent(sid, sel=null){
         <label class="field" style="margin:0"><span>상태</span><select name="status"><option value="approved" ${s.status==='approved'?'selected':''}>재학</option><option value="graduated" ${s.status==='graduated'?'selected':''}>졸업</option></select></label>
         <button class="btn sm primary">저장</button></form>
       <p class="muted" style="font-size:12px;margin:6px 0 0">아이디: ${esc(s.login_id||'')}</p></details>
+    ${cs.length ? `<details style="margin-top:14px" ${cs.some(c => ['new','seen'].includes(c.status)) ? 'open' : ''}><summary style="cursor:pointer;font-size:14px;font-weight:700">💬 상담 신청 ${cs.length}건</summary>${cs.map(c => counselCard(c, false)).join('')}</details>` : ''}
     <details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:13px">🔑 비밀번호 재설정</summary>
       <form id="reset-form" data-sid="${sid}" style="display:flex;gap:8px;margin-top:8px"><input class="inp" name="pin" minlength="6" required placeholder="새 비밀번호 (6자리 이상)" style="flex:1"><button class="btn sm primary">재설정</button></form></details>`, true);
 }
@@ -259,7 +300,13 @@ function onRealtime(p){
 }
 
 /* ===================================================================== 교사 이벤트 */
-async function startApp(){ await loadTeacher(); renderTeacher(); API.subscribe(onRealtime, onPeopleChange); }
+async function startApp(){ await loadTeacher(); renderTeacher(); API.subscribe(onRealtime, onPeopleChange, onCounselChange); }
+let csTimer = null;
+function onCounselChange(p){
+  if(p?.eventType === 'INSERT') toast('💬 새 상담 신청이 들어왔어요');
+  clearTimeout(csTimer);
+  csTimer = setTimeout(async () => { S.t.counsels = await API.allCounsels(); if($('#modal').classList.contains('hidden')){ const y = scrollY; renderTeacher(); scrollTo(0, y); } }, 500);
+}
 let pplTimer = null;
 function onPeopleChange(){
   clearTimeout(pplTimer);
@@ -283,6 +330,9 @@ document.addEventListener('click', async ev => {
   const act = a.dataset.act;
   if(act === 'tab'){ S.t.tab = a.dataset.v; return renderTeacher(); }
   if(act === 'approve'){ a.disabled = true; return actDo(() => API.approve(a.dataset.id), '승인했어요'); }
+  if(act === 'cfilter'){ S.t.cfilter[a.dataset.k] = a.dataset.v; return renderTeacher(); }
+  if(act === 'print-student'){ const s = S.t.people.find(p => p.id === a.dataset.sid);
+    const mine = S.t.entries.filter(e => e.student_id === s.id); closeModal(); return printReport(s, mine, classOf(s.class_id)); }
   if(act === 'approve-admin'){ a.disabled = true; return actDo(async () => { await API.approve(a.dataset.id); await API.setAdmin(a.dataset.id, true); }, '관리자로 승인했어요'); }
   if(act === 'set-admin'){ a.disabled = true; const v = a.dataset.v === '1'; return actDo(() => API.setAdmin(a.dataset.id, v), v ? '관리자로 지정했어요' : '관리자를 해제했어요'); }
   if(act === 'reject'){ a.disabled = true; return actDo(() => API.reject(a.dataset.id), '신청을 거절했어요'); }
@@ -309,6 +359,15 @@ document.addEventListener('change', async ev => {
 });
 document.addEventListener('submit', async ev => {
   const f = ev.target;
+  if(f.classList.contains('cform')){
+    ev.preventDefault();
+    const st = ev.submitter?.value || 'seen';
+    try{ await API.updateCounsel(+f.dataset.id, st, f.elements.note.value.trim() || null); S.t.counsels = await API.allCounsels();
+      const inModal = !$('#modal').classList.contains('hidden'), sid = $('#modal [data-act=print-student]')?.dataset.sid;
+      renderTeacher(); if(inModal && sid) openStudent(sid); toast(st === 'done' ? '상담 완료로 표시했어요' : '저장했어요'); }
+    catch(e){ toast(e.message); }
+    return;
+  }
   if(!['mission-form','reset-form','edit-form'].includes(f.getAttribute('id')) && !f.classList.contains('srow')) return;
   ev.preventDefault();
   if(f.getAttribute('id') === 'mission-form'){

@@ -244,3 +244,50 @@ table.hm{border-collapse:separate;border-spacing:0;font-size:12px}
   .flow .arrow{text-align:center}
   .login h1{font-size:34px}.login h1 .rose{font-size:42px}
 }
+
+/* ---------- 상담 신청 ---------- */
+.optrow{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.opt{border:1.5px solid var(--line);background:#fff;border-radius:99px;padding:6px 12px;cursor:pointer;font-weight:700;font-size:13px}
+.opt.on{border-color:var(--rose);background:var(--rose-l);color:var(--rose-d)}
+.olbl{font-size:13px;font-weight:700;color:var(--brown);margin:4px 0 6px}
+.creq{border:1.5px solid var(--line);border-radius:14px;padding:12px 14px;margin-top:10px;background:#fff}
+.creq .hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
+.creq .ct{margin:6px 0 0;font-size:14px}
+.creq .reply{margin-top:8px;background:#EEF6EF;border-radius:10px;padding:8px 10px;font-size:14px}
+.cst{font-size:12px;font-weight:800;padding:2px 8px;border-radius:99px}
+.cst.new{background:#FFE3DD;color:var(--down)}.cst.seen{background:#FFF1C9;color:#8A6400}.cst.done{background:var(--up-l);color:var(--up)}.cst.canceled{background:#EEE;color:#999}
+.creq.new{border-color:#F1B4A8;box-shadow:0 0 0 3px #FFF0EC}
+.urg-today{color:var(--down);font-weight:800}
+
+/* ---------- 인쇄 / PDF ---------- */
+#print-area{display:none}
+@media print{
+  @page{size:A4 portrait;margin:10mm}
+  body.printing{background:#fff}
+  body.printing > *:not(#print-area){display:none!important}
+  body.printing #print-area{display:block}
+  #print-area{font-size:10.5px;color:#222;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .pr-head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid var(--brown);padding-bottom:6px;margin-bottom:8px}
+  .pr-title{font-family:Jua,sans-serif;font-size:20px;color:var(--rose-d)}
+  .pr-who{font-size:15px;font-weight:800}
+  .pr-meta{text-align:right;font-size:10px;color:#666}
+  .pr-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+  .pr-stats div{border:1px solid #ddd;border-radius:8px;padding:5px 8px}
+  .pr-stats b{font-size:14px;display:block}
+  .pr-stats span{font-size:9px;color:#777}
+  #print-area .cal{border-width:1.5px}
+  #print-area .cal-cell{min-height:52px;padding:2px 4px}
+  #print-area .cal-cell .cw{font-size:17px;margin-top:4px}
+  #print-area .cal .hd{padding:3px 0;font-size:11px}
+  #print-area .cal-cell.today{box-shadow:none}
+  .pr-chart{margin:8px 0}
+  .pr-chart svg{min-width:0!important;max-height:150px}
+  .pr-h{font-size:12px;margin:8px 0 4px}
+  .pr-tbl{width:100%;border-collapse:collapse;font-size:9.5px}
+  .pr-tbl th,.pr-tbl td{border:1px solid #ddd;padding:3px 4px;vertical-align:top;text-align:left}
+  .pr-tbl th{background:#FBEDE4}
+  .pr-tbl tr{page-break-inside:avoid}
+  .pr-tbl .nw{white-space:nowrap}
+  .pr-tbl .em{white-space:nowrap;font-size:12px}
+  .pr-tbl .sub{color:#666;font-size:9px}
+}

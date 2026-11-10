@@ -13,6 +13,11 @@ const GROUP  = { green:'#D3EBCB', yellow:'#FFF0B3', purple:'#DCDDF7' };
 const CHG_TEXT = { up:'하루 동안 마음이 맑아졌어요 ☀️', same:'비슷한 마음으로 하루를 보냈어요', down:'마음이 조금 무거워졌어요. 오늘 수고 많았어요 🤍' };
 const CONCERN_WORDS = ['죽','자해','괴롭','때려','때렸','맞았','왕따','따돌','사라지','혼자','무서','힘들어','외로'];
 const DOW = ['일','월','화','수','목','금','토'];
+const C_TARGET  = { homeroom:'담임 선생님', counselor:'상담 선생님' };
+const C_URGENCY = { today:'오늘 꼭', week:'이번 주 안에', anytime:'편할 때' };
+const C_STATUS  = { new:'신청했어요', seen:'선생님이 확인했어요', done:'상담 완료', canceled:'취소했어요' };
+const C_CATS    = ['친구 관계','가족','공부·성적','진로','마음·건강','학교생활','기타'];
+const C_TIMES   = ['아침 조회 전','쉬는 시간','점심시간','방과 후','언제든 괜찮아요'];
 
 /* ===================================================================== 유틸 */
 const $  = (s, el=document) => el.querySelector(s);
@@ -106,12 +111,18 @@ const RealAPI = {
   async setMissionActive(id, active){ chk(await sb.from('missions').update({active}).eq('id', id)); },
   async updateClass(id, f){ chk(await sb.from('classes').update(f).eq('id', id)); },
   resetPin(id, pin){ return this._rpc('teacher_reset_pin', {p_student:id, p_pin:pin}); },
-  subscribe(cb, onPeople){
+  subscribe(cb, onPeople, onCounsel){
     sb.channel('entries-live')
       .on('postgres_changes', {event:'*', schema:'public', table:'daily_entries'}, p => cb(p))
       .on('postgres_changes', {event:'*', schema:'public', table:'profiles'}, () => onPeople && onPeople())
+      .on('postgres_changes', {event:'*', schema:'public', table:'counsel_requests'}, p => onCounsel && onCounsel(p))
       .subscribe();
   },
+  async myCounsels(uid){ return chk(await sb.from('counsel_requests').select('*').eq('student_id', uid).order('created_at', {ascending:false})); },
+  async allCounsels(){ return chk(await sb.from('counsel_requests').select('*').order('created_at', {ascending:false}).limit(1000)); },
+  requestCounsel(f){ return this._rpc('request_counsel', {p_target:f.target, p_category:f.category, p_urgency:f.urgency, p_time:f.time, p_content:f.content}); },
+  cancelCounsel(id){ return this._rpc('cancel_counsel', {p_id:id}); },
+  updateCounsel(id, status, note){ return this._rpc('update_counsel', {p_id:id, p_status:status, p_note:note}); },
 };
 
 /* ===================================================================== 체험 모드(가짜 데이터) */
@@ -173,7 +184,13 @@ function buildDemo(){
   profiles.push({id:'p-1', role:'student', login_id:'newbie1', class_id:'1-1', number:9, name:'남궁별', status:'pending', created_at:new Date().toISOString()},
                 {id:'p-2', role:'student', login_id:'newbie2', class_id:'2-1', number:9, name:'제갈솔', status:'pending', created_at:new Date().toISOString()},
                 {id:'p-3', role:'teacher', login_id:'coteacher', name:'부담임 선생님', status:'pending', created_at:new Date().toISOString()});
-  return { classes, missions, profiles, entries, nextId:id };
+  const ago = h => new Date(Date.now() - h*3600e3).toISOString();
+  const counsels = [
+    {id:1, student_id:'s-2-1-3', class_id:'2-1', entry_date:t, target:'counselor', category:'친구 관계', urgency:'today', preferred_time:'점심시간', content:'요즘 친구들이 저만 빼고 다니는 것 같아서 이야기하고 싶어요.', status:'new', teacher_note:null, created_at:ago(1)},
+    {id:2, student_id:'s-1-1-4', class_id:'1-1', entry_date:t, target:'homeroom', category:'공부·성적', urgency:'week', preferred_time:'방과 후', content:'수학 공부 방법을 여쭤보고 싶어요.', status:'seen', teacher_note:'목요일 방과 후에 교실에서 만나자!', created_at:ago(20)},
+    {id:3, student_id:'s-1-1-1', class_id:'1-1', entry_date:addDays(t,-3), target:'homeroom', category:'학교생활', urgency:'anytime', preferred_time:'쉬는 시간', content:'모둠 활동 때 역할 나누기가 어려워요.', status:'done', teacher_note:'이야기 나눠줘서 고마워 😊', created_at:ago(72)},
+  ];
+  return { classes, missions, profiles, entries, counsels, nextId:id };
 }
 const DemoAPI = (() => {
   let db = null, me = null;
@@ -221,6 +238,13 @@ const DemoAPI = (() => {
     async updateClass(id, f){ Object.assign(db.classes.find(c => c.id===id), f); },
     async resetPin(){ await wait(); },
     subscribe(){},
+    async myCounsels(uid){ return structuredClone(db.counsels.filter(c => c.student_id===uid).sort((a,b) => b.created_at.localeCompare(a.created_at))); },
+    async allCounsels(){ return structuredClone(db.counsels.slice().sort((a,b) => b.created_at.localeCompare(a.created_at))); },
+    async requestCounsel(f){ await wait(); const c = {id:Math.max(0,...db.counsels.map(x=>x.id))+1, student_id:me.id, class_id:me.class_id, entry_date:todayKST(),
+        target:f.target, category:f.category, urgency:f.urgency, preferred_time:f.time, content:f.content, status:'new', teacher_note:null, created_at:new Date().toISOString()};
+      db.counsels.push(c); return {...c}; },
+    async cancelCounsel(id){ await wait(); const c = db.counsels.find(x => x.id===id); if(c.status!=='new') throw new Error('이미 선생님이 확인한 신청은 취소할 수 없어요.'); c.status = 'canceled'; },
+    async updateCounsel(id, status, note){ await wait(); Object.assign(db.counsels.find(x => x.id===id), {status, teacher_note:note, handled_at:new Date().toISOString()}); },
   };
 })();
 const API = DEMO ? DemoAPI : RealAPI;
@@ -285,6 +309,40 @@ function calendarHTML(cls, byDate, opt={}){
   }
   return h + '</div>';
 }
+/* ---------- PDF 저장 / 인쇄용 리포트 ---------- */
+function printReport(p, entries, cls){
+  const byDate = Object.fromEntries(entries.map(e => [e.entry_date, e]));
+  const days = periodDates(cls), t = todayKST(), past = days.filter(d => d <= t);
+  const es = days.map(d => byDate[d]).filter(Boolean);
+  const chs = es.map(change).filter(Boolean);
+  const am = avg(es.map(e => tempOf(e,'am')).filter(v => v!=null)), pm = avg(es.map(e => tempOf(e,'pm')).filter(v => v!=null));
+  const rows = days.filter(d => byDate[d]).map(d => { const e = byDate[d], m = missionOf(e.mission_id), c = change(e);
+    return `<tr><td class="nw">${md(d)} (${DOW[dow(d)]})</td>
+      <td class="em">${e.am_weather ? WEATHER[e.am_weather].e+' '+tempOf(e,'am')+'°' : '–'}</td><td>${esc(e.am_reason||'')}</td>
+      <td class="em">${e.pm_weather ? WEATHER[e.pm_weather].e+' '+tempOf(e,'pm')+'°' : '–'}</td><td>${esc(e.pm_reason||'')}</td>
+      <td class="nw">${c ? (c.k==='up'?'▲':c.k==='down'?'▼':'＝')+Math.abs(c.d) : ''}</td>
+      <td>${m ? esc(m.text) : ''}${e.pledge ? `<div class="sub">다짐: ${esc(e.pledge)}</div>` : ''}${e.mission_result ? `<div class="sub">${RESULT[e.mission_result].e} ${RESULT[e.mission_result].n}${e.reflection ? ' · '+esc(e.reflection) : ''}</div>` : ''}</td></tr>`; }).join('');
+  let area = $('#print-area'); if(!area){ area = document.createElement('div'); area.id = 'print-area'; document.body.appendChild(area); }
+  area.innerHTML = `<div class="pr-head"><div><div class="pr-title">🌰 마음 특별한 하루 30일</div>
+      <div class="pr-who">${cls.name} ${p.number}번 ${esc(p.name)}</div></div>
+      <div class="pr-meta">기간 ${md(days[0])} ~ ${md(days[days.length-1])}<br>출력일 ${fmtDate(t)}</div></div>
+    <div class="pr-stats">
+      <div><b>${es.length}</b> / ${days.length}일<span>기록한 날</span></div>
+      <div><b>${am ?? '–'}° → ${pm ?? '–'}°</b><span>평균 마음 온도 (아침→저녁)</span></div>
+      <div><b>▲${chs.filter(c=>c.k==='up').length} ▼${chs.filter(c=>c.k==='down').length}</b><span>맑아진 날 / 무거워진 날</span></div>
+      <div><b>🍬 ${es.filter(e=>e.mission_result==='done').length}</b><span>마음사탕 (미션 성공)</span></div>
+    </div>
+    ${calendarHTML(cls, byDate)}
+    <div class="pr-chart">${lineChart(past, [{name:'아침', color:'#E39A2D', values:past.map(d=>tempOf(byDate[d],'am'))},{name:'저녁', color:'#6366C1', values:past.map(d=>tempOf(byDate[d],'pm'))}], 170)}</div>
+    <h3 class="pr-h">날짜별 기록</h3>
+    <table class="pr-tbl"><thead><tr><th>날짜</th><th colspan="2">🌅 아침 · 이유</th><th colspan="2">🌇 저녁 · 이유</th><th>변화</th><th>🍬 미션 · 다짐 · 결과</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="7" style="text-align:center">기록이 없어요</td></tr>'}</tbody></table>`;
+  document.body.classList.add('printing');
+  const done = () => { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  setTimeout(() => window.print(), 100);
+}
+
 function lineChart(labels, series, H=220){
   const n = labels.length; if(!n) return '<p class="muted">아직 데이터가 없어요.</p>';
   const W = Math.max(860, n*34), L=34, R=14, T=12, B=28, iw=W-L-R, ih=H-T-B;
