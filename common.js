@@ -24,6 +24,7 @@ const dow = s => new Date(s+'T00:00:00Z').getUTCDay();
 const md  = s => `${+s.slice(5,7)}/${+s.slice(8,10)}`;
 const fmtDate = s => `${+s.slice(5,7)}월 ${+s.slice(8,10)}일 (${DOW[dow(s)]})`;
 const avg = a => a.length ? Math.round(a.reduce((x,y)=>x+y,0)/a.length) : null;
+const schoolYear = () => { const t = todayKST(), y = +t.slice(0,4), m = +t.slice(5,7); return m >= 3 ? y : y - 1; };
 const tempOf = (e, k) => e?.[k+'_weather'] ? (e[k+'_temp'] ?? WEATHER[e[k+'_weather']].t) : null;
 
 function periodDates(c){
@@ -54,9 +55,9 @@ function closeModal(){ $('#modal').classList.add('hidden'); $('#modal-body').inn
 /* ===================================================================== Supabase API */
 let sb = null;
 if(!DEMO && window.supabase) sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const emailFor = (kind, a) => kind === 'student'
-  ? `s${a.classId}-${a.number}@${EMAIL_DOMAIN}`
-  : `t-${String(a.id).toLowerCase().replace(/[^a-z0-9_.-]/g,'')}@${EMAIL_DOMAIN}`;
+const cleanId = id => String(id || '').trim().toLowerCase();
+const ID_RULE = /^[a-z0-9_]{3,20}$/;
+const emailFor = (kind, a) => `${kind === 'student' ? 's' : 't'}-${cleanId(a.id)}@${EMAIL_DOMAIN}`;
 const chk = ({data, error}) => { if(error) throw new Error(error.message); return data; };
 
 const RealAPI = {
@@ -68,15 +69,15 @@ const RealAPI = {
   async classes(){ return chk(await sb.from('classes').select('*').order('id')); },
   async signIn(kind, a, pin){
     const {error} = await sb.auth.signInWithPassword({email: emailFor(kind,a), password: pin});
-    if(error) throw new Error(kind==='student' ? '학급·번호 또는 비밀번호가 맞지 않아요.' : '아이디 또는 비밀번호가 맞지 않아요.');
+    if(error) throw new Error('아이디 또는 비밀번호가 맞지 않아요.');
     const p = await this.profile(); if(!p) throw new Error('계정 정보를 찾을 수 없어요. 선생님께 문의하세요.'); return p;
   },
   async signUp(kind, a, pin){
     const msg = chk(await sb.rpc('check_signup', {p_role:kind, p_code:a.code, p_class_id:a.classId||null, p_number:a.number||null}));
     if(msg) throw new Error(msg);
     const {data, error} = await sb.auth.signUp({ email: emailFor(kind,a), password: pin,
-      options:{ data:{ role:kind, class_id:a.classId||null, number:a.number||null, name:a.name, join_code:a.code } } });
-    if(error) throw new Error(/registered|exists/i.test(error.message) ? '이미 등록된 계정이에요. 로그인해 주세요.' : '등록하지 못했어요: '+error.message);
+      options:{ data:{ role:kind, login_id:cleanId(a.id), class_id:a.classId||null, number:a.number||null, name:a.name, join_code:a.code } } });
+    if(error) throw new Error(/registered|exists/i.test(error.message) ? '이미 쓰고 있는 아이디예요. 다른 아이디를 정해 주세요.' : '등록하지 못했어요: '+error.message);
     if(!data.session) throw new Error('등록은 되었지만 로그인할 수 없어요. (선생님: Supabase → Authentication → Sign In / Providers → Email → "Confirm email"을 꺼 주세요)');
     return this.profile();
   },
@@ -87,7 +88,11 @@ const RealAPI = {
   setPledge(p){ return this._rpc('set_pledge', {p_pledge:p}); },
   submitEvening(w,t,r,res,ref){ return this._rpc('submit_evening', {p_weather:w, p_temp:t, p_reason:r, p_result:res, p_reflection:ref}); },
   async _rpc(n, a){ return chk(await sb.rpc(n, a)); },
-  async students(){ return chk(await sb.from('profiles').select('*').eq('role','student').order('class_id').order('number')); },
+  async people(){ return chk(await sb.from('profiles').select('*').order('class_id').order('number')); },
+  approve(id){ return this._rpc('approve_user', {p_id:id}); },
+  reject(id){ return this._rpc('reject_user', {p_id:id}); },
+  updateStudent(id, f){ return this._rpc('update_student', {p_id:id, p_class_id:f.class_id, p_number:f.number, p_name:f.name, p_status:f.status}); },
+  promote(){ return this._rpc('promote_students', {}); },
   async allEntries(){
     const out = []; const size = 1000;
     for(let from = 0; ; from += size){
@@ -100,8 +105,11 @@ const RealAPI = {
   async setMissionActive(id, active){ chk(await sb.from('missions').update({active}).eq('id', id)); },
   async updateClass(id, f){ chk(await sb.from('classes').update(f).eq('id', id)); },
   resetPin(id, pin){ return this._rpc('teacher_reset_pin', {p_student:id, p_pin:pin}); },
-  subscribe(cb){
-    sb.channel('entries-live').on('postgres_changes', {event:'*', schema:'public', table:'daily_entries'}, p => cb(p)).subscribe();
+  subscribe(cb, onPeople){
+    sb.channel('entries-live')
+      .on('postgres_changes', {event:'*', schema:'public', table:'daily_entries'}, p => cb(p))
+      .on('postgres_changes', {event:'*', schema:'public', table:'profiles'}, () => onPeople && onPeople())
+      .subscribe();
   },
 };
 
@@ -128,8 +136,8 @@ function buildDemo(){
   ].map(([text,grp],i) => ({id:i+1, text, grp, active:true, sort:i+1}));
   const names = ['김하늘','이도윤','박서아','최지호','정하린','강시우','윤채원','장민준','임서연','한예준','오지안','서도현',
                  '신유나','권태오','황수아','안건우','송다인','류은호','전나윤','홍지후','고아린','문하준','양서윤','배로운'];
-  const profiles = [{id:'t-1', role:'teacher', name:'담임 선생님'}];
-  classes.forEach((c, ci) => { for(let k=1; k<=8; k++) profiles.push({id:`s-${c.id}-${k}`, role:'student', class_id:c.id, number:k, name:names[ci*8+k-1]}); });
+  const profiles = [{id:'t-1', role:'teacher', login_id:'teacher', name:'담임 선생님', status:'approved', is_admin:true}];
+  classes.forEach((c, ci) => { for(let k=1; k<=8; k++) profiles.push({id:`s-${c.id}-${k}`, role:'student', login_id:`student${ci*8+k}`, class_id:c.id, number:k, name:names[ci*8+k-1], status:'approved'}); });
   const AMR = {1:['친구랑 등교하면서 웃긴 얘기를 했어요','아침을 맛있게 먹었어요','오늘 체육 시간이 기대돼요'],2:['조금 졸리지만 괜찮아요','숙제를 다 해서 마음이 가벼워요','날씨가 좋아요'],3:['어제 늦게 자서 피곤해요','특별한 일은 없어요','월요일이라 그냥 그래요'],4:['시험 때문에 걱정돼요','아침에 엄마랑 말다툼했어요','버스를 놓쳐서 뛰어왔어요'],5:['친구랑 다퉈서 속상해요','아무것도 하기 싫어요','머리가 아파요']};
   const PMR = {1:['친구에게 칭찬을 들었어요','점심이 맛있었어요','발표를 잘해서 뿌듯해요'],2:['그럭저럭 괜찮은 하루였어요','친구랑 화해했어요','동아리 활동이 재밌었어요'],3:['조금 지쳤어요','수학이 어려웠어요','평범한 하루였어요'],4:['모둠 활동에서 서운했어요','숙제가 너무 많아요','시험을 망친 것 같아요'],5:['친구랑 크게 다퉜어요','하루가 너무 길었어요','혼자 있고 싶어요']};
   const PLG = ['쉬는 시간에 짝꿍에게 먼저 말 걸기','점심시간에 꼭 해볼게요','모둠 활동 때 실천하기','집에 가기 전에 꼭 할게요'];
@@ -161,6 +169,9 @@ function buildDemo(){
       list.push(e); entries.push(e);
     });
   });
+  profiles.push({id:'p-1', role:'student', login_id:'newbie1', class_id:'1-1', number:9, name:'남궁별', status:'pending', created_at:new Date().toISOString()},
+                {id:'p-2', role:'student', login_id:'newbie2', class_id:'2-1', number:9, name:'제갈솔', status:'pending', created_at:new Date().toISOString()},
+                {id:'p-3', role:'teacher', login_id:'coteacher', name:'부담임 선생님', status:'pending', created_at:new Date().toISOString()});
   return { classes, missions, profiles, entries, nextId:id };
 }
 const DemoAPI = (() => {
@@ -188,7 +199,18 @@ const DemoAPI = (() => {
     async setPledge(p){ await wait(); const e = today(false); if(!e?.mission_id) throw new Error('아침 마음을 먼저 등록해 주세요.'); e.pledge = p; return {...e}; },
     async submitEvening(w,t,r,res,ref){ await wait(); const e = today(true);
       Object.assign(e, {pm_weather:w, pm_temp:t, pm_reason:r, mission_result:e.mission_id?res:null, reflection:ref}); return {...e}; },
-    async students(){ return structuredClone(db.profiles.filter(p => p.role==='student')); },
+    async people(){ return structuredClone(db.profiles); },
+    async approve(id){ await wait(); const p = db.profiles.find(x => x.id===id); p.status = 'approved'; },
+    async reject(id){ await wait(); db.profiles = db.profiles.filter(x => x.id!==id); },
+    async updateStudent(id, f){ await wait();
+      if(f.status==='approved' && db.profiles.some(x => x.id!==id && x.role==='student' && x.status!=='graduated' && x.class_id===f.class_id && x.number===f.number)) throw new Error('그 반·번호에 이미 다른 학생이 있어요.');
+      Object.assign(db.profiles.find(x => x.id===id), f); },
+    async promote(){ await wait(); const maxg = Math.max(...db.classes.map(c => c.grade)); let up = 0, gr = 0;
+      const act = db.profiles.filter(p => p.role==='student' && p.status!=='graduated');
+      act.forEach(p => { const c = db.classes.find(x => x.id===p.class_id); if(!c) return;
+        if(c.grade===maxg){ p.status = 'graduated'; gr++; }
+        else { const n = db.classes.find(x => x.grade===c.grade+1 && x.class_no===c.class_no); if(n){ p.class_id = n.id; up++; } } });
+      return `진급 ${up}명, 졸업 ${gr}명`; },
     async allEntries(){ return structuredClone(db.entries); },
     async addMission(text, grp){ const m = {id:Math.max(...db.missions.map(x=>x.id))+1, text, grp, active:true, sort:db.missions.length+1}; db.missions.push(m); return {...m}; },
     async setMissionActive(id, a){ db.missions.find(m => m.id===id).active = a; },
@@ -212,7 +234,7 @@ const missionOf = id => S.missions.find(m => m.id === id);
 /* ===================================================================== 공통 화면 조각 */
 function topbar(extra=''){
   const me = S.me;
-  const who = me.role==='student' ? `${classOf(me.class_id)?.name||''} ${me.number}번 ${esc(me.name)}` : `${esc(me.name)} <span class="badge">교사</span>`;
+  const who = me.role==='student' ? `${classOf(me.class_id)?.name||''} ${me.number}번 ${esc(me.name)}` : `${esc(me.name)} <span class="badge">${me.is_admin ? '관리자' : '교사'}</span>`;
   return `<header class="top"><div class="top-in">
     <div class="brand">🌰 <span><span class="rose">마음</span> 특별한 <span class="rose">하루</span> 30일</span>${APP_ROLE==='teacher' ? '<span class="badge" style="margin-left:4px">관리</span>' : ''}</div>
     <div class="who">${DEMO?'<span class="badge demo">체험 모드</span>':''}${extra}<span class="nm">${who}</span>
@@ -289,14 +311,15 @@ function renderLogin(err=''){
     <div class="card">
       <h2 style="text-align:center">${su ? (st ? '처음 등록하기' : '선생님 계정 만들기') : (st ? '🎒 들어가기' : '🍎 선생님 로그인')}</h2>
       <form id="auth-form" autocomplete="off">
-        ${st ? `<div class="row2"><label class="field"><span>학급</span><select name="classId">${S.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}</select></label>
-          <label class="field"><span>번호</span><input name="number" type="number" min="1" max="60" inputmode="numeric" required placeholder="예: 15"></label></div>`
-          : `<label class="field"><span>아이디 (영문/숫자)</span><input name="id" required placeholder="예: kimteacher"></label>`}
-        ${su ? `<label class="field"><span>이름</span><input name="name" required maxlength="20"></label>
-          <label class="field"><span>${st?'학급 코드 (선생님께 받기)':'교사 코드'}</span><input name="code" required></label>` : ''}
-        <label class="field"><span>비밀번호 (6자리 이상)</span><input name="pin" type="password" minlength="6" required ${st?'inputmode="numeric"':''}></label>
+        <label class="field"><span>아이디 ${su ? '(영어 소문자·숫자 3~20자)' : ''}</span><input name="id" required autocapitalize="none" autocomplete="username" placeholder="${st ? '예: haneul15' : '예: kimteacher'}"></label>
+        <label class="field"><span>비밀번호 (6자리 이상)</span><input name="pin" type="password" minlength="6" required autocomplete="${su ? 'new-password' : 'current-password'}"></label>
+        ${su ? `${st ? `<div class="row2"><label class="field"><span>학급</span><select name="classId">${S.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}</select></label>
+          <label class="field"><span>번호</span><input name="number" type="number" min="1" max="60" inputmode="numeric" required placeholder="예: 15"></label></div>` : ''}
+          <label class="field"><span>이름</span><input name="name" required maxlength="20"></label>
+          <label class="field"><span>가입 코드 (올해 학년도 숫자)</span><input name="code" required inputmode="numeric" placeholder="예: ${schoolYear()}"></label>
+          <p class="muted" style="font-size:12px;margin:-4px 0 6px">신청하면 ${st ? '선생님' : '관리자'}이 승인한 뒤에 사용할 수 있어요.</p>` : ''}
         <div class="err">${esc(err)}</div>
-        <button class="btn primary big" type="submit">${su ? '등록하고 시작하기' : '들어가기'}</button>
+        <button class="btn primary big" type="submit">${su ? '가입 신청하기' : '들어가기'}</button>
       </form>
       <p style="text-align:center;margin:12px 0 0"><button class="btn ghost sm" data-act="auth-mode">${su ? '이미 등록했어요 → 로그인' : '처음이에요 → 등록하기'}</button></p>
     </div></div>`;
@@ -304,6 +327,7 @@ function renderLogin(err=''){
 async function onAuthSubmit(f){
   const a = { classId:f.classId?.value, number:f.number ? +f.number.value : null, id:f.id?.value.trim(), name:f.name?.value.trim(), code:f.code?.value.trim() };
   const pin = f.pin.value;
+  if(S.ui.authMode === 'signup' && !ID_RULE.test(cleanId(a.id))) return renderLogin('아이디는 영어 소문자·숫자·_ 로 3~20자로 정해 주세요.');
   f.querySelector('button[type=submit]').disabled = true;
   try{
     const me = S.ui.authMode === 'signup' ? await API.signUp(APP_ROLE, a, pin) : await API.signIn(APP_ROLE, a, pin);
@@ -318,6 +342,7 @@ document.addEventListener('click', async ev => {
   const act = a.dataset.act;
   if(act === 'close-modal') return closeModal();
   if(act === 'demo'){ const me = await DemoAPI.loginAs(APP_ROLE); return enter(me); }
+  if(act === 'recheck'){ const me = await API.session(); if(me && me.status === 'approved') return enter(me); return toast('아직 승인 전이에요. 조금만 기다려 주세요.'); }
   if(act === 'auth-mode'){ S.ui.authMode = S.ui.authMode === 'login' ? 'signup' : 'login'; return renderLogin(); }
   if(act === 'logout'){ await API.signOut(); S.me = null; S.ui = {...S.ui, editAm:false, openPm:false, pledgeOpen:false}; closeModal(); return renderLogin(); }
 });
@@ -332,10 +357,20 @@ async function enter(me){
     return renderLogin(APP_ROLE === 'teacher' ? '학생 계정은 선생님 페이지에 들어올 수 없어요.' : '선생님 계정이에요. 선생님용 페이지(teacher.html)에서 로그인해 주세요.');
   }
   S.me = me;
+  if(me.status !== 'approved') return renderWaiting(me);
   try{
     S.missions = await API.missions();
     await startApp();   // student.js / teacher.js 에서 정의
   }catch(e){ fatal(e); }
+}
+function renderWaiting(me){
+  const grad = me.status === 'graduated';
+  app.innerHTML = `<div class="login"><div class="hero"><div class="acorn">${grad ? '🎓' : '⏳'}</div></div>
+    <div class="card" style="text-align:center"><h2>${grad ? '졸업을 축하해요!' : '가입 신청이 접수됐어요'}</h2>
+    <p>${grad ? '졸업한 계정이라 더 이상 기록할 수 없어요.' : `<b>${esc(me.name)}</b>님, ${me.role==='student' ? '선생님' : '관리자'}이 승인하면 바로 사용할 수 있어요.`}</p>
+    ${!grad ? `<p class="muted" style="font-size:13px">아이디: <b>${esc(me.login_id||'')}</b>${me.role==='student' ? ` · ${classOf(me.class_id)?.name||''} ${me.number}번` : ''}</p>` : ''}
+    <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+      ${!grad ? '<button class="btn primary" data-act="recheck">승인됐는지 확인</button>' : ''}<button class="btn" data-act="logout">로그아웃</button></div></div></div>`;
 }
 function fatal(e){
   app.innerHTML = `<div class="login"><div class="card"><h2>앗, 연결에 문제가 있어요</h2><p>${esc(e.message)}</p>

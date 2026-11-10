@@ -1,7 +1,15 @@
 /* ===================================================================== 교사 화면 */
+async function loadPeople(){
+  const people = await API.people();
+  S.t.people = people;
+  S.t.students = people.filter(p => p.role === 'student' && p.status === 'approved').sort((a,b) => a.class_id.localeCompare(b.class_id) || a.number - b.number);
+  S.t.pending = people.filter(p => p.status === 'pending');
+  S.t.graduates = people.filter(p => p.role === 'student' && p.status === 'graduated');
+  S.t.teachers = people.filter(p => p.role === 'teacher' && p.status === 'approved');
+}
 async function loadTeacher(){
-  const [st, en] = await Promise.all([API.students(), API.allEntries()]);
-  S.t.students = st; S.t.entries = en; reindex();
+  const [, en] = await Promise.all([loadPeople(), API.allEntries()]);
+  S.t.entries = en; reindex();
 }
 function reindex(){
   const idx = {};
@@ -9,6 +17,8 @@ function reindex(){
   S.t.idx = idx;
 }
 const tStudents = () => S.t.students.filter(s => S.t.classId === 'all' || s.class_id === S.t.classId);
+const isAdmin = () => !!S.me?.is_admin;
+const fmtTime = iso => { if(!iso) return ''; const d = new Date(iso); return d.toLocaleString('ko-KR', {timeZone:'Asia/Seoul', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'}); };
 const sLabel = s => `${classOf(s.class_id)?.name.replace('학년 ','-').replace('반','')} ${s.number}번 ${s.name}`;
 
 function concernsFor(s, D){
@@ -23,19 +33,20 @@ function concernsFor(s, D){
 }
 
 function renderTeacher(){
-  const tabs = [['today','📊 오늘 한눈에'],['trend','📈 기간 추이'],['missions','🍬 미션'],['settings','⚙️ 학급 설정']];
+  const pc = (S.t.pending || []).length;
+  const tabs = [['today','📊 오늘 한눈에'],['trend','📈 기간 추이'],['approve',`✅ 가입 승인${pc ? ` <span class="badge" style="background:var(--down);color:#fff">${pc}</span>` : ''}`],['missions','🍬 미션'],['settings','⚙️ 학급 설정']];
   const T = S.t;
   app.innerHTML = topbar(DEMO ? '' : '<span class="live" id="live">실시간</span>') + `
     <nav style="border-bottom:1px solid var(--line);background:var(--paper)"><div class="tabs">${tabs.map(([k,v]) => `<button class="${T.tab===k?'on':''}" data-act="tab" data-v="${k}">${v}</button>`).join('')}</div></nav>
     <div class="twrap">
-      ${T.tab !== 'settings' ? `<div class="filters">
+      ${!['settings','approve'].includes(T.tab) ? `<div class="filters">
         <div class="chips">${[['all','전체'], ...S.classes.map(c => [c.id, c.name])].map(([k,v]) => `<button class="chip ${T.classId===k?'on':''}" data-act="cls" data-v="${k}">${v}</button>`).join('')}</div>
         ${T.tab === 'today' ? `<span style="margin-left:auto;display:flex;gap:6px;align-items:center">
           <button class="btn sm" data-act="day" data-v="-1">◀</button><input type="date" class="inp" id="tdate" value="${T.date}"><button class="btn sm" data-act="day" data-v="1">▶</button>
           <button class="btn sm" data-act="day" data-v="0">오늘</button></span>` : ''}
         <button class="btn sm" data-act="refresh" title="새로 불러오기">🔄</button>
       </div>` : ''}
-      <div id="tbody">${({today:tToday, trend:tTrend, missions:tMissions, settings:tSettings})[T.tab]()}</div>
+      <div id="tbody">${({today:tToday, trend:tTrend, approve:tApprove, missions:tMissions, settings:tSettings})[T.tab]()}</div>
     </div>`;
 }
 
@@ -140,6 +151,25 @@ function tMissions(){
       <button class="btn primary">추가</button></form></div>`;
 }
 
+function tApprove(){
+  const pend = S.t.pending || [];
+  const ps = pend.filter(p => p.role === 'student').sort((a,b) => (a.class_id||'').localeCompare(b.class_id||'') || a.number - b.number);
+  const pt = pend.filter(p => p.role === 'teacher');
+  const row = p => `<div class="mrow" style="background:#fff;border:1.5px solid var(--line)">
+      <span class="tx">${p.role==='student' ? `<b>${classOf(p.class_id)?.name||''} ${p.number}번</b> ` : ''}${esc(p.name)}
+        <span class="muted" style="font-weight:400;font-size:13px"> · 아이디 ${esc(p.login_id||'')}${p.created_at ? ' · '+fmtTime(p.created_at)+' 신청' : ''}</span></span>
+      ${p.role==='teacher' && !isAdmin() ? '<span class="muted" style="font-size:12px">관리자만 승인 가능</span>'
+        : `<button class="btn sm primary" data-act="approve" data-id="${p.id}">승인</button><button class="btn sm" data-act="reject" data-id="${p.id}">거절</button>`}
+    </div>`;
+  return `<div class="card"><h2>🎒 학생 가입 신청 <span class="muted" style="font-size:14px;font-family:Pretendard">${ps.length}명</span></h2>
+    ${ps.length ? `<p style="margin:-4px 0 10px"><button class="btn sm primary" data-act="approve-all">학생 모두 승인</button></p>${ps.map(row).join('')}`
+      : '<p class="muted">승인을 기다리는 학생이 없어요.</p>'}
+    <p class="muted" style="font-size:12px;margin:10px 0 0">반·번호·이름이 맞는지 확인하고 승인해 주세요. 거절하면 신청이 지워지고, 학생이 다시 신청할 수 있어요. 승인 뒤에도 학생 이름을 눌러 정보를 고칠 수 있어요.</p></div>
+  <div class="card"><h2>🍎 선생님 가입 신청 <span class="muted" style="font-size:14px;font-family:Pretendard">${pt.length}명</span></h2>
+    ${pt.length ? pt.map(row).join('') : '<p class="muted">승인을 기다리는 선생님이 없어요.</p>'}
+    <p class="muted" style="font-size:12px;margin:10px 0 0">선생님 계정은 모든 학생의 기록을 볼 수 있어서, 관리자만 승인할 수 있어요. 현재 관리자: ${S.t.teachers.filter(t => t.is_admin).map(t => esc(t.name)).join(', ') || '-'}</p></div>`;
+}
+
 function tSettings(){
   return `<div class="card"><h2>🔗 학생용 페이지 주소</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><code class="inp" style="flex:1;min-width:240px;background:#fff">${esc(studentPageURL())}</code>
@@ -154,15 +184,30 @@ function tSettings(){
         <label style="display:flex;gap:6px;align-items:center;font-size:14px"><input type="checkbox" name="include_weekend" ${c.include_weekend?'checked':''}> 주말 포함</label>
         <span style="display:flex;gap:8px;align-items:center"><span class="muted" style="font-size:12px">${d.length ? `~ ${md(d[d.length-1])}` : ''}</span><button class="btn sm primary">저장</button></span></form>`; }).join('')}
   </div>
-  <div class="card"><h2>👥 등록한 학생 <span class="muted" style="font-size:14px;font-family:Pretendard">${S.t.students.length}명</span></h2>
-    <p class="muted" style="font-size:13px;margin-top:-4px">학생은 학생용 페이지의 '처음이에요 → 등록하기'에서 학급, 번호, 이름, 학급 코드, 비밀번호로 직접 등록해요. 비밀번호를 잊은 학생은 이름을 눌러 재설정할 수 있어요.</p>
+  <div class="card"><h2>👥 재학 중인 학생 <span class="muted" style="font-size:14px;font-family:Pretendard">${S.t.students.length}명</span></h2>
+    <p class="muted" style="font-size:13px;margin-top:-4px">학생은 학생용 페이지의 '처음이에요 → 등록하기'에서 아이디, 비밀번호, 학급, 번호, 이름, 가입 코드(올해 학년도 숫자: ${schoolYear()})로 신청하고, ✅ 가입 승인 탭에서 승인하면 사용할 수 있어요. 이름을 누르면 반·번호 수정, 비밀번호 재설정을 할 수 있어요.</p>
     ${S.classes.map(c => { const l = S.t.students.filter(s => s.class_id===c.id);
       return `<div style="margin:10px 0"><b>${c.name}</b> <span class="muted">(${l.length}명)</span><div class="chips" style="margin-top:6px">${l.map(s => `<button class="chip" data-act="student" data-sid="${s.id}">${s.number}. ${esc(s.name)}</button>`).join('') || '<span class="muted">아직 없음</span>'}</div></div>`; }).join('')}
+    ${S.t.graduates.length ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:13px">🎓 졸업생 ${S.t.graduates.length}명</summary><div class="chips" style="margin-top:6px">${S.t.graduates.map(s => `<button class="chip" data-act="student" data-sid="${s.id}">${esc(s.name)}</button>`).join('')}</div></details>` : ''}
+  </div>
+  <div class="card"><h2>🎓 새 학년도 진급</h2>
+    <p style="margin-top:-4px">학년이 바뀌는 3월에 <b>한 번만</b> 눌러 주세요. 학생은 다시 가입하지 않아도 되고, 아이디·비밀번호·지난 기록이 그대로 유지돼요.</p>
+    <ul style="margin:6px 0 10px;padding-left:20px;font-size:14px">
+      ${S.classes.slice().sort((a,b) => a.grade-b.grade).map(c => { const n = S.classes.find(x => x.grade===c.grade+1 && x.class_no===c.class_no);
+        const cnt = S.t.students.filter(s => s.class_id===c.id).length + (S.t.pending||[]).filter(s => s.class_id===c.id).length;
+        return `<li>${c.name} (${cnt}명) → ${n ? n.name : '<b>졸업</b>'}</li>`; }).join('')}
+    </ul>
+    <p class="muted" style="font-size:12px">번호는 그대로 옮겨져요. 새 번호가 정해지면 학생 이름을 눌러 고쳐 주세요. 진급한 뒤 ⚙️ 위의 학급별 30일 시작일도 새로 정해 주세요.</p>
+    ${isAdmin() ? (S.ui.promoteArm
+        ? `<div class="note" style="background:#FFF0EC;color:var(--down)"><b>정말 진급할까요?</b> 되돌릴 수 없어요.
+            <div style="display:flex;gap:8px;margin-top:8px"><button class="btn primary" data-act="promote-go">네, 진급합니다</button><button class="btn" data-act="promote-cancel">취소</button></div></div>`
+        : `<button class="btn primary" data-act="promote-arm">🎓 진급 처리하기</button>`)
+      : '<p class="muted">진급 처리는 관리자 선생님만 할 수 있어요.</p>'}
   </div>`;
 }
 
 function openStudent(sid, sel=null){
-  const s = S.t.students.find(x => x.id === sid); if(!s) return;
+  const s = (S.t.people || []).find(x => x.id === sid); if(!s) return;
   const cls = classOf(s.class_id), m = S.t.idx[sid] || {}, t = todayKST();
   const days = periodDates(cls).filter(d => d <= t);
   const es = Object.values(m);
@@ -179,7 +224,15 @@ function openStudent(sid, sel=null){
     ${lineChart(days, [{name:'아침', color:'var(--am)', values:days.map(d=>tempOf(m[d],'am'))},{name:'저녁', color:'var(--pm)', values:days.map(d=>tempOf(m[d],'pm'))}], 180)}
     <div style="margin-top:14px">${calendarHTML(cls, m, {sid, sel:recent})}</div>
     <div id="sd-detail" class="card" style="margin-top:12px">${recent ? entryDetailHTML(m[recent], recent) : ''}</div>
-    <details style="margin-top:14px"><summary class="muted" style="cursor:pointer;font-size:13px">🔑 비밀번호 재설정</summary>
+    <details style="margin-top:14px"><summary class="muted" style="cursor:pointer;font-size:13px">✏️ 학생 정보 수정 (반·번호·이름·졸업)</summary>
+      <form id="edit-form" data-sid="${sid}" style="display:grid;grid-template-columns:1fr 90px 1fr 1fr auto;gap:8px;margin-top:8px;align-items:end">
+        <label class="field" style="margin:0"><span>학급</span><select name="class_id">${S.classes.map(c => `<option value="${c.id}" ${c.id===s.class_id?'selected':''}>${c.name}</option>`).join('')}</select></label>
+        <label class="field" style="margin:0"><span>번호</span><input name="number" type="number" min="1" max="60" value="${s.number}" required></label>
+        <label class="field" style="margin:0"><span>이름</span><input name="name" maxlength="20" value="${esc(s.name)}" required></label>
+        <label class="field" style="margin:0"><span>상태</span><select name="status"><option value="approved" ${s.status==='approved'?'selected':''}>재학</option><option value="graduated" ${s.status==='graduated'?'selected':''}>졸업</option></select></label>
+        <button class="btn sm primary">저장</button></form>
+      <p class="muted" style="font-size:12px;margin:6px 0 0">아이디: ${esc(s.login_id||'')}</p></details>
+    <details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:13px">🔑 비밀번호 재설정</summary>
       <form id="reset-form" data-sid="${sid}" style="display:flex;gap:8px;margin-top:8px"><input class="inp" name="pin" minlength="6" required placeholder="새 비밀번호 (6자리 이상)" style="flex:1"><button class="btn sm primary">재설정</button></form></details>`, true);
 }
 
@@ -195,7 +248,16 @@ function onRealtime(p){
 }
 
 /* ===================================================================== 교사 이벤트 */
-async function startApp(){ await loadTeacher(); renderTeacher(); API.subscribe(onRealtime); }
+async function startApp(){ await loadTeacher(); renderTeacher(); API.subscribe(onRealtime, onPeopleChange); }
+let pplTimer = null;
+function onPeopleChange(){
+  clearTimeout(pplTimer);
+  pplTimer = setTimeout(async () => { await loadPeople(); if($('#modal').classList.contains('hidden')){ const y = scrollY; renderTeacher(); scrollTo(0, y); } }, 600);
+}
+async function actDo(fn, msg){
+  try{ const r = await fn(); await loadPeople(); renderTeacher(); toast(typeof r === 'string' ? r : msg); }
+  catch(e){ toast(e.message); }
+}
 const studentPageURL = () => new URL('student.html', location.href).href;
 
 document.addEventListener('click', async ev => {
@@ -209,6 +271,13 @@ document.addEventListener('click', async ev => {
   const a = ev.target.closest('[data-act]'); if(!a) return;
   const act = a.dataset.act;
   if(act === 'tab'){ S.t.tab = a.dataset.v; return renderTeacher(); }
+  if(act === 'approve'){ a.disabled = true; return actDo(() => API.approve(a.dataset.id), '승인했어요'); }
+  if(act === 'reject'){ a.disabled = true; return actDo(() => API.reject(a.dataset.id), '신청을 거절했어요'); }
+  if(act === 'approve-all'){ a.disabled = true; const ids = S.t.pending.filter(p => p.role==='student').map(p => p.id);
+    return actDo(async () => { for(const id of ids) await API.approve(id); }, `학생 ${ids.length}명을 승인했어요`); }
+  if(act === 'promote-arm'){ S.ui.promoteArm = true; return renderTeacher(); }
+  if(act === 'promote-cancel'){ S.ui.promoteArm = false; return renderTeacher(); }
+  if(act === 'promote-go'){ a.disabled = true; S.ui.promoteArm = false; return actDo(() => API.promote(), '진급 처리했어요'); }
   if(act === 'cls'){ S.t.classId = a.dataset.v; return renderTeacher(); }
   if(act === 'day'){ const v = +a.dataset.v; S.t.date = v === 0 ? todayKST() : addDays(S.t.date, v); return renderTeacher(); }
   if(act === 'refresh'){ a.disabled = true; await loadTeacher(); S.missions = await API.missions(); renderTeacher(); return toast('새로 불러왔어요'); }
@@ -227,7 +296,7 @@ document.addEventListener('change', async ev => {
 });
 document.addEventListener('submit', async ev => {
   const f = ev.target;
-  if(!['mission-form','reset-form'].includes(f.id) && !f.classList.contains('srow')) return;
+  if(!['mission-form','reset-form','edit-form'].includes(f.id) && !f.classList.contains('srow')) return;
   ev.preventDefault();
   if(f.id === 'mission-form'){
     try{ const m = await API.addMission(f.text.value.trim(), f.grp.value); S.missions.push(m); renderTeacher(); toast('미션을 추가했어요'); }
@@ -237,6 +306,12 @@ document.addEventListener('submit', async ev => {
   if(f.classList.contains('srow')){
     const fields = { start_date:f.start_date.value, total_days:+f.total_days.value, include_weekend:f.include_weekend.checked };
     try{ await API.updateClass(f.dataset.cid, fields); Object.assign(classOf(f.dataset.cid), fields); renderTeacher(); toast('저장했어요'); }
+    catch(e){ toast(e.message); }
+    return;
+  }
+  if(f.id === 'edit-form'){
+    const fields = { class_id:f.class_id.value, number:+f.number.value, name:f.name.value.trim(), status:f.status.value };
+    try{ await API.updateStudent(f.dataset.sid, fields); await loadPeople(); closeModal(); renderTeacher(); toast('학생 정보를 고쳤어요'); }
     catch(e){ toast(e.message); }
     return;
   }
