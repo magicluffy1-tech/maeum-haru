@@ -93,6 +93,7 @@ const RealAPI = {
   reject(id){ return this._rpc('reject_user', {p_id:id}); },
   updateStudent(id, f){ return this._rpc('update_student', {p_id:id, p_class_id:f.class_id, p_number:f.number, p_name:f.name, p_status:f.status}); },
   promote(){ return this._rpc('promote_students', {}); },
+  setAdmin(id, v){ return this._rpc('set_admin', {p_id:id, p_admin:v}); },
   async allEntries(){
     const out = []; const size = 1000;
     for(let from = 0; ; from += size){
@@ -205,6 +206,9 @@ const DemoAPI = (() => {
     async updateStudent(id, f){ await wait();
       if(f.status==='approved' && db.profiles.some(x => x.id!==id && x.role==='student' && x.status!=='graduated' && x.class_id===f.class_id && x.number===f.number)) throw new Error('그 반·번호에 이미 다른 학생이 있어요.');
       Object.assign(db.profiles.find(x => x.id===id), f); },
+    async setAdmin(id, v){ await wait();
+      if(!v && db.profiles.filter(p => p.role==='teacher' && p.status==='approved' && p.is_admin).length <= 1 && db.profiles.find(p => p.id===id).is_admin) throw new Error('관리자는 최소 한 명은 있어야 해요.');
+      db.profiles.find(p => p.id===id).is_admin = v; },
     async promote(){ await wait(); const maxg = Math.max(...db.classes.map(c => c.grade)); let up = 0, gr = 0;
       const act = db.profiles.filter(p => p.role==='student' && p.status!=='graduated');
       act.forEach(p => { const c = db.classes.find(x => x.id===p.class_id); if(!c) return;

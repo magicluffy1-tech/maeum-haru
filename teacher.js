@@ -6,6 +6,7 @@ async function loadPeople(){
   S.t.pending = people.filter(p => p.status === 'pending');
   S.t.graduates = people.filter(p => p.role === 'student' && p.status === 'graduated');
   S.t.teachers = people.filter(p => p.role === 'teacher' && p.status === 'approved');
+  const mine = people.find(p => p.id === S.me?.id); if(mine) S.me = {...S.me, ...mine};
 }
 async function loadTeacher(){
   const [, en] = await Promise.all([loadPeople(), API.allEntries()]);
@@ -159,7 +160,7 @@ function tApprove(){
       <span class="tx">${p.role==='student' ? `<b>${classOf(p.class_id)?.name||''} ${p.number}번</b> ` : ''}${esc(p.name)}
         <span class="muted" style="font-weight:400;font-size:13px"> · 아이디 ${esc(p.login_id||'')}${p.created_at ? ' · '+fmtTime(p.created_at)+' 신청' : ''}</span></span>
       ${p.role==='teacher' && !isAdmin() ? '<span class="muted" style="font-size:12px">관리자만 승인 가능</span>'
-        : `<button class="btn sm primary" data-act="approve" data-id="${p.id}">승인</button><button class="btn sm" data-act="reject" data-id="${p.id}">거절</button>`}
+        : `<button class="btn sm primary" data-act="approve" data-id="${p.id}">승인</button>${p.role==='teacher' ? `<button class="btn sm" data-act="approve-admin" data-id="${p.id}">관리자로 승인</button>` : ''}<button class="btn sm" data-act="reject" data-id="${p.id}">거절</button>`}
     </div>`;
   return `<div class="card"><h2>🎒 학생 가입 신청 <span class="muted" style="font-size:14px;font-family:Pretendard">${ps.length}명</span></h2>
     ${ps.length ? `<p style="margin:-4px 0 10px"><button class="btn sm primary" data-act="approve-all">학생 모두 승인</button></p>${ps.map(row).join('')}`
@@ -189,6 +190,16 @@ function tSettings(){
     ${S.classes.map(c => { const l = S.t.students.filter(s => s.class_id===c.id);
       return `<div style="margin:10px 0"><b>${c.name}</b> <span class="muted">(${l.length}명)</span><div class="chips" style="margin-top:6px">${l.map(s => `<button class="chip" data-act="student" data-sid="${s.id}">${s.number}. ${esc(s.name)}</button>`).join('') || '<span class="muted">아직 없음</span>'}</div></div>`; }).join('')}
     ${S.t.graduates.length ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:13px">🎓 졸업생 ${S.t.graduates.length}명</summary><div class="chips" style="margin-top:6px">${S.t.graduates.map(s => `<button class="chip" data-act="student" data-sid="${s.id}">${esc(s.name)}</button>`).join('')}</div></details>` : ''}
+  </div>
+  <div class="card"><h2>🍎 선생님 목록 <span class="muted" style="font-size:14px;font-family:Pretendard">${S.t.teachers.length}명</span></h2>
+    <p class="muted" style="font-size:13px;margin-top:-4px">관리자는 선생님 가입 승인, 관리자 지정, 진급 처리를 할 수 있어요. 일반 선생님은 학생 승인과 기록 보기, 학생 정보 수정을 할 수 있어요.</p>
+    ${S.t.teachers.map(t => `<div class="mrow" style="background:#fff;border:1.5px solid var(--line)">
+      <span class="tx">${esc(t.name)} ${t.is_admin ? '<span class="badge">관리자</span>' : ''}${t.id === S.me.id ? ' <span class="muted" style="font-size:12px">(나)</span>' : ''}
+        <span class="muted" style="font-weight:400;font-size:13px"> · 아이디 ${esc(t.login_id||'')}</span></span>
+      ${isAdmin() ? (t.is_admin
+          ? `<button class="btn sm" data-act="set-admin" data-id="${t.id}" data-v="0">관리자 해제</button>`
+          : `<button class="btn sm primary" data-act="set-admin" data-id="${t.id}" data-v="1">관리자로 지정</button>`) : ''}
+    </div>`).join('')}
   </div>
   <div class="card"><h2>🎓 새 학년도 진급</h2>
     <p style="margin-top:-4px">학년이 바뀌는 3월에 <b>한 번만</b> 눌러 주세요. 학생은 다시 가입하지 않아도 되고, 아이디·비밀번호·지난 기록이 그대로 유지돼요.</p>
@@ -272,6 +283,8 @@ document.addEventListener('click', async ev => {
   const act = a.dataset.act;
   if(act === 'tab'){ S.t.tab = a.dataset.v; return renderTeacher(); }
   if(act === 'approve'){ a.disabled = true; return actDo(() => API.approve(a.dataset.id), '승인했어요'); }
+  if(act === 'approve-admin'){ a.disabled = true; return actDo(async () => { await API.approve(a.dataset.id); await API.setAdmin(a.dataset.id, true); }, '관리자로 승인했어요'); }
+  if(act === 'set-admin'){ a.disabled = true; const v = a.dataset.v === '1'; return actDo(() => API.setAdmin(a.dataset.id, v), v ? '관리자로 지정했어요' : '관리자를 해제했어요'); }
   if(act === 'reject'){ a.disabled = true; return actDo(() => API.reject(a.dataset.id), '신청을 거절했어요'); }
   if(act === 'approve-all'){ a.disabled = true; const ids = S.t.pending.filter(p => p.role==='student').map(p => p.id);
     return actDo(async () => { for(const id of ids) await API.approve(id); }, `학생 ${ids.length}명을 승인했어요`); }
