@@ -121,7 +121,7 @@ document.addEventListener('input', ev => {
 document.addEventListener('submit', async ev => {
   const f = ev.target;
   if(f.classList.contains('wform')){ ev.preventDefault(); return onWeatherSubmit(f); }
-  if(f.id === 'pledge-form'){
+  if(f.getAttribute('id') === 'pledge-form'){
     ev.preventDefault();
     try{ await API.setPledge(f.pledge.value.trim()); S.ui.pledgeOpen = false; S.entries = await API.myEntries(S.me.id); renderStudent(); toast('다짐을 저장했어요! 종례 시간에 확인해요 💪'); }
     catch(e){ toast(e.message); }

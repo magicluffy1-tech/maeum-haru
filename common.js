@@ -311,7 +311,7 @@ function renderLogin(err=''){
     <div class="card">
       <h2 style="text-align:center">${su ? (st ? '처음 등록하기' : '선생님 계정 만들기') : (st ? '🎒 들어가기' : '🍎 선생님 로그인')}</h2>
       <form id="auth-form" autocomplete="off">
-        <label class="field"><span>아이디 ${su ? '(영어 소문자·숫자 3~20자)' : ''}</span><input name="id" required autocapitalize="none" autocomplete="username" placeholder="${st ? '예: haneul15' : '예: kimteacher'}"></label>
+        <label class="field"><span>아이디 ${su ? '(영어 소문자·숫자 3~20자)' : ''}</span><input name="loginid" required autocapitalize="none" autocomplete="username" placeholder="${st ? '예: haneul15' : '예: kimteacher'}"></label>
         <label class="field"><span>비밀번호 (6자리 이상)</span><input name="pin" type="password" minlength="6" required autocomplete="${su ? 'new-password' : 'current-password'}"></label>
         ${su ? `${st ? `<div class="row2"><label class="field"><span>학급</span><select name="classId">${S.classes.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}</select></label>
           <label class="field"><span>번호</span><input name="number" type="number" min="1" max="60" inputmode="numeric" required placeholder="예: 15"></label></div>` : ''}
@@ -325,8 +325,9 @@ function renderLogin(err=''){
     </div></div>`;
 }
 async function onAuthSubmit(f){
-  const a = { classId:f.classId?.value, number:f.number ? +f.number.value : null, id:f.id?.value.trim(), name:f.name?.value.trim(), code:f.code?.value.trim() };
-  const pin = f.pin.value;
+  const el = f.elements;
+  const a = { classId:el.classId?.value, number:el.number ? +el.number.value : null, id:el.loginid?.value.trim(), name:el.name?.value.trim(), code:el.code?.value.trim() };
+  const pin = el.pin.value;
   if(S.ui.authMode === 'signup' && !ID_RULE.test(cleanId(a.id))) return renderLogin('아이디는 영어 소문자·숫자·_ 로 3~20자로 정해 주세요.');
   f.querySelector('button[type=submit]').disabled = true;
   try{
@@ -346,7 +347,7 @@ document.addEventListener('click', async ev => {
   if(act === 'auth-mode'){ S.ui.authMode = S.ui.authMode === 'login' ? 'signup' : 'login'; return renderLogin(); }
   if(act === 'logout'){ await API.signOut(); S.me = null; S.ui = {...S.ui, editAm:false, openPm:false, pledgeOpen:false}; closeModal(); return renderLogin(); }
 });
-document.addEventListener('submit', ev => { if(ev.target.id === 'auth-form'){ ev.preventDefault(); onAuthSubmit(ev.target); } });
+document.addEventListener('submit', ev => { if(ev.target.getAttribute('id') === 'auth-form'){ ev.preventDefault(); onAuthSubmit(ev.target); } });
 document.addEventListener('keydown', ev => { if(ev.key === 'Escape') closeModal(); });
 
 /* ===================================================================== 시작 */

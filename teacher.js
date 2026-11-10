@@ -296,9 +296,9 @@ document.addEventListener('change', async ev => {
 });
 document.addEventListener('submit', async ev => {
   const f = ev.target;
-  if(!['mission-form','reset-form','edit-form'].includes(f.id) && !f.classList.contains('srow')) return;
+  if(!['mission-form','reset-form','edit-form'].includes(f.getAttribute('id')) && !f.classList.contains('srow')) return;
   ev.preventDefault();
-  if(f.id === 'mission-form'){
+  if(f.getAttribute('id') === 'mission-form'){
     try{ const m = await API.addMission(f.text.value.trim(), f.grp.value); S.missions.push(m); renderTeacher(); toast('미션을 추가했어요'); }
     catch(e){ toast(e.message); }
     return;
@@ -309,13 +309,13 @@ document.addEventListener('submit', async ev => {
     catch(e){ toast(e.message); }
     return;
   }
-  if(f.id === 'edit-form'){
+  if(f.getAttribute('id') === 'edit-form'){
     const fields = { class_id:f.class_id.value, number:+f.number.value, name:f.name.value.trim(), status:f.status.value };
     try{ await API.updateStudent(f.dataset.sid, fields); await loadPeople(); closeModal(); renderTeacher(); toast('학생 정보를 고쳤어요'); }
     catch(e){ toast(e.message); }
     return;
   }
-  if(f.id === 'reset-form'){
+  if(f.getAttribute('id') === 'reset-form'){
     try{ await API.resetPin(f.dataset.sid, f.pin.value); f.reset(); toast('비밀번호를 바꿨어요. 학생에게 알려 주세요.'); }
     catch(e){ toast(e.message); }
   }
