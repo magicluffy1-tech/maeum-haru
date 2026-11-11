@@ -126,6 +126,8 @@ const RealAPI = {
   updateCounsel(id, status, note){ return this._rpc('update_counsel', {p_id:id, p_status:status, p_note:note}); },
   async myReflections(uid){ return chk(await sb.from('reflections').select('*').eq('student_id', uid).order('ref_key')); },
   async allReflections(){ return chk(await sb.from('reflections').select('*').order('ref_key').limit(5000)); },
+  deleteStudent(id){ return this._rpc('delete_student', {p_id:id}); },
+  deleteGraduates(){ return this._rpc('delete_graduates', {}); },
   saveReflection(kind, ref, answers){ return this._rpc('save_reflection', {p_kind:kind, p_ref:ref, p_answers:answers}); },
 };
 
@@ -248,6 +250,10 @@ const DemoAPI = (() => {
     async updateClass(id, f){ Object.assign(db.classes.find(c => c.id===id), f); },
     async resetPin(){ await wait(); },
     subscribe(){},
+    async deleteStudent(id){ await wait(); const keep = x => x.student_id !== id;
+      db.profiles = db.profiles.filter(p => p.id !== id); db.entries = db.entries.filter(keep); db.counsels = db.counsels.filter(keep); db.reflections = db.reflections.filter(keep); },
+    async deleteGraduates(){ await wait(); const ids = db.profiles.filter(p => p.role==='student' && p.status==='graduated').map(p => p.id);
+      for(const id of ids) await this.deleteStudent(id); return ids.length; },
     async myReflections(uid){ return structuredClone(db.reflections.filter(r => r.student_id===uid)); },
     async allReflections(){ return structuredClone(db.reflections); },
     async saveReflection(kind, ref, answers){ await wait();

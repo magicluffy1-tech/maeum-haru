@@ -227,7 +227,11 @@ function tSettings(){
     <p class="muted" style="font-size:13px;margin-top:-4px">학생은 학생용 페이지의 '처음이에요 → 등록하기'에서 아이디, 비밀번호, 학급, 번호, 이름, 가입 코드(올해 학년도 숫자: ${schoolYear()})로 신청하고, ✅ 가입 승인 탭에서 승인하면 사용할 수 있어요. 이름을 누르면 반·번호 수정, 비밀번호 재설정을 할 수 있어요.</p>
     ${S.classes.map(c => { const l = S.t.students.filter(s => s.class_id===c.id);
       return `<div style="margin:10px 0"><b>${c.name}</b> <span class="muted">(${l.length}명)</span><div class="chips" style="margin-top:6px">${l.map(s => `<button class="chip" data-act="student" data-sid="${s.id}">${s.number}. ${esc(s.name)}</button>`).join('') || '<span class="muted">아직 없음</span>'}</div></div>`; }).join('')}
-    ${S.t.graduates.length ? `<details style="margin-top:8px"><summary class="muted" style="cursor:pointer;font-size:13px">🎓 졸업생 ${S.t.graduates.length}명</summary><div class="chips" style="margin-top:6px">${S.t.graduates.map(s => `<button class="chip" data-act="student" data-sid="${s.id}">${esc(s.name)}</button>`).join('')}</div></details>` : ''}
+    ${S.t.graduates.length ? `<details style="margin-top:8px" ${S.ui.gradArm ? 'open' : ''}><summary class="muted" style="cursor:pointer;font-size:13px">🎓 졸업생 ${S.t.graduates.length}명</summary><div class="chips" style="margin-top:6px">${S.t.graduates.map(s => `<button class="chip" data-act="student" data-sid="${s.id}">${esc(s.name)}</button>`).join('')}</div>
+      ${isAdmin() ? (S.ui.gradArm
+        ? `<div class="note" style="background:#FFF0EC;margin-top:8px"><b style="color:var(--down)">졸업생 ${S.t.graduates.length}명의 계정과 모든 기록을 영구 삭제할까요?</b> 되돌릴 수 없어요.
+            <div style="display:flex;gap:8px;margin-top:8px"><button class="btn sm" data-act="grad-del-go" style="background:var(--down);border-color:var(--down);color:#fff">네, 모두 삭제합니다</button><button class="btn sm" data-act="grad-del-cancel">취소</button></div></div>`
+        : `<p style="margin:8px 0 0"><button class="btn sm" data-act="grad-del-arm">🗑️ 졸업생 기록 모두 삭제</button> <span class="muted" style="font-size:12px">개인정보 보관 기간이 지나면 정리해 주세요.</span></p>`) : ''}</details>` : ''}
   </div>
   <div class="card"><h2>🍎 선생님 목록 <span class="muted" style="font-size:14px;font-family:Pretendard">${S.t.teachers.length}명</span></h2>
     <p class="muted" style="font-size:13px;margin-top:-4px">관리자는 선생님 가입 승인, 관리자 지정, 진급 처리를 할 수 있어요. 일반 선생님은 학생 승인과 기록 보기, 학생 정보 수정을 할 수 있어요.</p>
@@ -287,6 +291,13 @@ function openStudent(sid, sel=null){
       <div class="card" style="margin-top:8px">${insightsHTML(insightsFor(es, periodDates(cls)))}</div>
       <div style="margin-top:10px">${reflectionsHTML((S.t.refls||[]).filter(r => r.student_id === sid), cls)}</div></details>
     ${cs.length ? `<details style="margin-top:14px" ${cs.some(c => ['new','seen'].includes(c.status)) ? 'open' : ''}><summary style="cursor:pointer;font-size:14px;font-weight:700">💬 상담 신청 ${cs.length}건</summary>${cs.map(c => counselCard(c, false)).join('')}</details>` : ''}
+    ${isAdmin() ? `<details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;color:var(--down)">🗑️ 계정 삭제 (관리자)</summary>
+      <form id="delete-form" data-sid="${sid}" class="note" style="background:#FFF0EC;color:var(--ink);margin-top:8px">
+        <b style="color:var(--down)">이 학생의 계정과 모든 기록이 영구히 삭제돼요. 되돌릴 수 없어요.</b>
+        <div style="font-size:13px;margin:6px 0">삭제되는 것: 로그인 계정 · 학생 정보 · 마음 기록 ${es.length}일 · 상담 신청 ${cs.length}건 · 편지와 돌아보기 ${(S.t.refls||[]).filter(r => r.student_id === sid).length}개</div>
+        <div style="font-size:13px;margin-bottom:6px">필요하면 먼저 위의 <b>📄 PDF 저장</b>으로 기록을 보관해 두세요. 확인을 위해 학생 이름 <b>${esc(s.name)}</b>을(를) 그대로 입력해 주세요.</div>
+        <div style="display:flex;gap:8px"><input class="inp" name="confirm" placeholder="${esc(s.name)}" autocomplete="off" style="flex:1"><button class="btn sm" style="background:var(--down);border-color:var(--down);color:#fff">영구 삭제</button></div>
+      </form></details>` : ''}
     <details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:13px">🔑 비밀번호 재설정</summary>
       <form id="reset-form" data-sid="${sid}" style="display:flex;gap:8px;margin-top:8px"><input class="inp" name="pin" minlength="6" required placeholder="새 비밀번호 (6자리 이상)" style="flex:1"><button class="btn sm primary">재설정</button></form></details>`, true);
 }
@@ -333,6 +344,10 @@ document.addEventListener('click', async ev => {
   const act = a.dataset.act;
   if(act === 'tab'){ S.t.tab = a.dataset.v; return renderTeacher(); }
   if(act === 'approve'){ a.disabled = true; return actDo(() => API.approve(a.dataset.id), '승인했어요'); }
+  if(act === 'grad-del-arm'){ S.ui.gradArm = true; return renderTeacher(); }
+  if(act === 'grad-del-cancel'){ S.ui.gradArm = false; return renderTeacher(); }
+  if(act === 'grad-del-go'){ a.disabled = true; S.ui.gradArm = false;
+    try{ const n = await API.deleteGraduates(); await loadTeacher(); renderTeacher(); toast(`졸업생 ${n}명의 기록을 삭제했어요`); }catch(e){ toast(e.message); } return; }
   if(act === 'cfilter'){ S.t.cfilter[a.dataset.k] = a.dataset.v; return renderTeacher(); }
   if(act === 'print-student'){ const s = S.t.people.find(p => p.id === a.dataset.sid);
     const mine = S.t.entries.filter(e => e.student_id === s.id); closeModal(); return printReport(s, mine, classOf(s.class_id), (S.t.refls||[]).filter(r => r.student_id === s.id)); }
@@ -369,6 +384,15 @@ document.addEventListener('submit', async ev => {
       const inModal = !$('#modal').classList.contains('hidden'), sid = $('#modal [data-act=print-student]')?.dataset.sid;
       renderTeacher(); if(inModal && sid) openStudent(sid); toast(st === 'done' ? '상담 완료로 표시했어요' : '저장했어요'); }
     catch(e){ toast(e.message); }
+    return;
+  }
+  if(f.getAttribute('id') === 'delete-form'){
+    ev.preventDefault();
+    const s = S.t.people.find(p => p.id === f.dataset.sid);
+    if(f.elements.confirm.value.trim() !== s.name) return toast('학생 이름이 일치하지 않아요.');
+    f.querySelector('button').disabled = true;
+    try{ await API.deleteStudent(s.id); closeModal(); await loadTeacher(); renderTeacher(); toast(`${s.name} 학생의 계정과 기록을 삭제했어요`); }
+    catch(e){ toast(e.message); f.querySelector('button').disabled = false; }
     return;
   }
   if(!['mission-form','reset-form','edit-form'].includes(f.getAttribute('id')) && !f.classList.contains('srow')) return;
