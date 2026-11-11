@@ -18,6 +18,7 @@ const C_URGENCY = { today:'오늘 꼭', week:'이번 주 안에', anytime:'편�
 const C_STATUS  = { new:'신청했어요', seen:'선생님이 확인했어요', done:'상담 완료', canceled:'취소했어요' };
 const C_CATS    = ['친구 관계','가족','공부·성적','진로','마음·건강','학교생활','기타'];
 const C_TIMES   = ['아침 조회 전','쉬는 시간','점심시간','방과 후','언제든 괜찮아요'];
+const W_Q = [['best','이번 주, 내 마음이 가장 맑았던 순간은?'],['help','마음이 무거웠을 때 나를 도와준 건 무엇이었나요?'],['next','다음 주의 나에게 한마디']];
 
 /* ===================================================================== 유틸 */
 const $  = (s, el=document) => el.querySelector(s);
@@ -123,6 +124,9 @@ const RealAPI = {
   requestCounsel(f){ return this._rpc('request_counsel', {p_target:f.target, p_category:f.category, p_urgency:f.urgency, p_time:f.time, p_content:f.content}); },
   cancelCounsel(id){ return this._rpc('cancel_counsel', {p_id:id}); },
   updateCounsel(id, status, note){ return this._rpc('update_counsel', {p_id:id, p_status:status, p_note:note}); },
+  async myReflections(uid){ return chk(await sb.from('reflections').select('*').eq('student_id', uid).order('ref_key')); },
+  async allReflections(){ return chk(await sb.from('reflections').select('*').order('ref_key').limit(5000)); },
+  saveReflection(kind, ref, answers){ return this._rpc('save_reflection', {p_kind:kind, p_ref:ref, p_answers:answers}); },
 };
 
 /* ===================================================================== 체험 모드(가짜 데이터) */
@@ -190,7 +194,13 @@ function buildDemo(){
     {id:2, student_id:'s-1-1-4', class_id:'1-1', entry_date:t, target:'homeroom', category:'공부·성적', urgency:'week', preferred_time:'방과 후', content:'수학 공부 방법을 여쭤보고 싶어요.', status:'seen', teacher_note:'목요일 방과 후에 교실에서 만나자!', created_at:ago(20)},
     {id:3, student_id:'s-1-1-1', class_id:'1-1', entry_date:addDays(t,-3), target:'homeroom', category:'학교생활', urgency:'anytime', preferred_time:'쉬는 시간', content:'모둠 활동 때 역할 나누기가 어려워요.', status:'done', teacher_note:'이야기 나눠줘서 고마워 😊', created_at:ago(72)},
   ];
-  return { classes, missions, profiles, entries, counsels, nextId:id };
+  const wk = weekKey(t), pw = addDays(wk, -7);
+  const reflections = [
+    {id:1, student_id:'s-1-1-1', kind:'letter_start', ref_key:s, answers:{text:'30일 뒤의 하늘아, 친구들한테 먼저 말 거는 사람이 되어 있었으면 좋겠어. 힘든 날도 있겠지만 잘 버텨 줘!'}},
+    {id:2, student_id:'s-1-1-1', kind:'weekly', ref_key:pw, answers:{best:'체육 시간에 우리 팀이 이겼을 때', help:'짝꿍이 괜찮냐고 물어봐 준 것', next:'수학 숙제 미루지 말자!'}},
+    {id:3, student_id:'s-2-1-3', kind:'weekly', ref_key:pw, answers:{best:'잘 모르겠어요', help:'집에서 강아지랑 놀았던 것', next:'조금만 더 힘내자'}},
+  ];
+  return { classes, missions, profiles, entries, counsels, reflections, nextId:id };
 }
 const DemoAPI = (() => {
   let db = null, me = null;
@@ -238,6 +248,12 @@ const DemoAPI = (() => {
     async updateClass(id, f){ Object.assign(db.classes.find(c => c.id===id), f); },
     async resetPin(){ await wait(); },
     subscribe(){},
+    async myReflections(uid){ return structuredClone(db.reflections.filter(r => r.student_id===uid)); },
+    async allReflections(){ return structuredClone(db.reflections); },
+    async saveReflection(kind, ref, answers){ await wait();
+      let r = db.reflections.find(x => x.student_id===me.id && x.kind===kind && x.ref_key===ref);
+      if(!r){ r = {id:db.reflections.length+1, student_id:me.id, kind, ref_key:ref}; db.reflections.push(r); }
+      r.answers = answers; r.updated_at = new Date().toISOString(); return {...r}; },
     async myCounsels(uid){ return structuredClone(db.counsels.filter(c => c.student_id===uid).sort((a,b) => b.created_at.localeCompare(a.created_at))); },
     async allCounsels(){ return structuredClone(db.counsels.slice().sort((a,b) => b.created_at.localeCompare(a.created_at))); },
     async requestCounsel(f){ await wait(); const c = {id:Math.max(0,...db.counsels.map(x=>x.id))+1, student_id:me.id, class_id:me.class_id, entry_date:todayKST(),
@@ -309,8 +325,72 @@ function calendarHTML(cls, byDate, opt={}){
   }
   return h + '</div>';
 }
+/* ---------- 자기성찰 도우미 ---------- */
+const weekKey = d => addDays(d, -((dow(d) + 6) % 7));       // 그 주 월요일
+const reflOf = (list, kind, key) => (list || []).find(r => r.kind === kind && r.ref_key === key);
+const STOP = new Set(['오늘','그냥','너무','조금','진짜','정말','많이','그래서','때문','그리고','아침','저녁','하루','기분','마음','그런','이런','약간','완전','계속','다시','모두','우리','나는','내가','제가','저는']);
+function words(txt){
+  return String(txt || '').replace(/[^가-힣a-zA-Z0-9\s]/g, ' ').split(/\s+/)
+    .map(w => w.replace(/(에서|에게|한테|이랑|하고|까지|부터|으로|처럼|은|는|이|가|을|를|에|도|랑|와|과|의|로|만|요)$/, ''))
+    .filter(w => w.length >= 2 && !STOP.has(w) && !/(어요|아요|해요|했어|었어|았어|웠어|들어|네요|다|고|서|게|지|데|면)$/.test(w));
+}
+function topWords(list, n=3){
+  const c = {}; list.forEach(t => new Set(words(t)).forEach(w => c[w] = (c[w]||0) + 1));
+  return Object.entries(c).filter(([,v]) => v >= 2).sort((a,b) => b[1]-a[1]).slice(0, n).map(([w]) => w);
+}
+// 기록에서 '나의 마음 발견' 문장 만들기 (5일 이상 기록 필요)
+function insightsFor(entries, days){
+  const set = new Set(days), es = entries.filter(e => set.has(e.entry_date) && (e.am_weather || e.pm_weather));
+  if(es.length < 5) return null;
+  const out = [];
+  const chs = es.map(e => ({e, c:change(e)})).filter(x => x.c);
+  if(chs.length >= 3){
+    const d = avg(chs.map(x => x.c.d));
+    out.push(d >= 3 ? {i:'☀️', t:`하루를 보내고 나면 마음이 평균 <b>${d}° 맑아져요</b>. 학교에서의 하루가 마음을 데워 주고 있어요.`}
+      : d <= -3 ? {i:'🌙', t:`하루를 보내고 나면 마음이 평균 <b>${-d}° 무거워지는</b> 편이에요. 저녁엔 나를 위한 쉼을 꼭 챙겨 주세요.`}
+      : {i:'⚖️', t:`아침과 저녁 마음이 <b>비슷하게 유지되는</b> 편이에요. 마음이 꽤 단단하네요.`});
+  }
+  const pmT = x => tempOf(x, 'pm');
+  const done = es.filter(e => e.mission_result === 'done' && pmT(e) != null), other = es.filter(e => e.mission_id && e.mission_result !== 'done' && pmT(e) != null);
+  if(done.length >= 2 && other.length >= 2){
+    const diff = avg(done.map(pmT)) - avg(other.map(pmT));
+    out.push(diff >= 3 ? {i:'🍬', t:`미션을 해낸 날, 저녁 마음이 평균 <b>${diff}° 더 맑았어요</b>. 누군가를 위한 작은 행동이 내 마음도 밝혀 주나 봐요.`}
+      : diff <= -3 ? {i:'🍬', t:`미션을 해낸 날 저녁이 오히려 <b>${-diff}° 낮았어요</b>. 미션이 부담됐던 건 아닌지 살펴봐요.`}
+      : {i:'🍬', t:`미션을 한 날과 안 한 날의 저녁 마음은 <b>비슷했어요</b>.`});
+  }
+  const byDow = k => { const m = {}; es.forEach(e => { const v = tempOf(e, k); if(v != null) (m[dow(e.entry_date)] ||= []).push(v); });
+    return Object.entries(m).filter(([,a]) => a.length >= 2).map(([d,a]) => [+d, avg(a)]); };
+  const amD = byDow('am'), pmD = byDow('pm');
+  if(amD.length >= 2){ const lo = amD.sort((a,b) => a[1]-b[1])[0]; out.push({i:'📅', t:`<b>${DOW[lo[0]]}요일 아침</b>이 가장 흐린 편이에요 (평균 ${lo[1]}°). 그날 아침엔 나에게 조금 더 다정하게!`}); }
+  if(pmD.length >= 2){ const hi = pmD.sort((a,b) => b[1]-a[1])[0]; out.push({i:'🌈', t:`<b>${DOW[hi[0]]}요일 저녁</b>이 가장 맑아요 (평균 ${hi[1]}°).`}); }
+  const ups = chs.filter(x => x.c.k === 'up').map(x => x.e), downs = chs.filter(x => x.c.k === 'down').map(x => x.e);
+  const uw = topWords(ups.map(e => [e.pm_reason, e.reflection].join(' ')));
+  if(uw.length) out.push({i:'💬', t:`마음이 맑아진 날 자주 나온 말: <b>${uw.map(esc).join(', ')}</b>. 나를 맑게 하는 것들이에요.`});
+  const dw = topWords(downs.map(e => e.pm_reason));
+  if(dw.length) out.push({i:'🌧️', t:`마음이 무거워진 날 자주 나온 말: <b>${dw.map(esc).join(', ')}</b>. 이럴 때 나에게 필요한 건 무엇일까요?`});
+  const best = chs.filter(x => x.c.k === 'up').sort((a,b) => b.c.d - a.c.d)[0];
+  if(best) out.push({i:'✨', t:`가장 크게 맑아진 날은 <b>${fmtDate(best.e.entry_date)}</b> (▲${best.c.d}°)${best.e.pm_reason ? ` — “${esc(best.e.pm_reason)}”` : ''}`});
+  return out;
+}
+function insightsHTML(list, n){
+  if(!list) return `<p class="muted">기록이 <b>5일</b> 이상 쌓이면 내 마음의 패턴을 찾아 드릴게요.</p>`;
+  return `<ul class="ins">${list.map(x => `<li><span>${x.i}</span><div>${x.t}</div></li>`).join('')}</ul>`;
+}
+// 교사 화면·출력용 성찰 기록 모아 보기
+function reflectionsHTML(list, cls){
+  const key = cls?.start_date;
+  const ls = reflOf(list, 'letter_start', key), le = reflOf(list, 'letter_end', key);
+  const ws = (list || []).filter(r => r.kind === 'weekly').sort((a,b) => a.ref_key.localeCompare(b.ref_key));
+  let h = '';
+  if(ls || le) h += `<div class="letter"><div class="lt">📮 30일 뒤의 나에게</div><p>${ls ? esc(ls.answers.text) : '<span class="muted">(쓰지 않았어요)</span>'}</p>
+    ${le ? `<div class="lt">📬 30일 전의 나에게</div><p>${esc(le.answers.reply || '')}</p>
+      ${(le.answers.warm||[]).filter(Boolean).length ? `<div class="lt">🤍 나에게 들려주고 싶은 따뜻한 말</div><ul class="warm">${le.answers.warm.filter(Boolean).map(w => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}` : ''}</div>`;
+  if(ws.length) h += ws.map(w => `<div class="wk"><div class="lt">🗓️ ${md(w.ref_key)} 주 돌아보기</div>${W_Q.map(([k,q]) => w.answers[k] ? `<div class="wq"><span>${q}</span>${esc(w.answers[k])}</div>` : '').join('')}</div>`).join('');
+  return h || '<p class="muted">아직 성찰 기록이 없어요.</p>';
+}
+
 /* ---------- PDF 저장 / 인쇄용 리포트 ---------- */
-function printReport(p, entries, cls){
+function printReport(p, entries, cls, refls=[]){
   const byDate = Object.fromEntries(entries.map(e => [e.entry_date, e]));
   const days = periodDates(cls), t = todayKST(), past = days.filter(d => d <= t);
   const es = days.map(d => byDate[d]).filter(Boolean);
@@ -336,7 +416,10 @@ function printReport(p, entries, cls){
     <div class="pr-chart">${lineChart(past, [{name:'아침', color:'#E39A2D', values:past.map(d=>tempOf(byDate[d],'am'))},{name:'저녁', color:'#6366C1', values:past.map(d=>tempOf(byDate[d],'pm'))}], 170)}</div>
     <h3 class="pr-h">날짜별 기록</h3>
     <table class="pr-tbl"><thead><tr><th>날짜</th><th colspan="2">🌅 아침 · 이유</th><th colspan="2">🌇 저녁 · 이유</th><th>변화</th><th>🍬 미션 · 다짐 · 결과</th></tr></thead>
-    <tbody>${rows || '<tr><td colspan="7" style="text-align:center">기록이 없어요</td></tr>'}</tbody></table>`;
+    <tbody>${rows || '<tr><td colspan="7" style="text-align:center">기록이 없어요</td></tr>'}</tbody></table>
+    <div class="pr-break"></div>
+    <h3 class="pr-h">🔍 나의 마음 발견</h3>${insightsHTML(insightsFor(entries, days))}
+    <h3 class="pr-h">🪞 나를 돌아본 기록</h3>${reflectionsHTML(refls, cls)}`;
   document.body.classList.add('printing');
   const done = () => { document.body.classList.remove('printing'); window.removeEventListener('afterprint', done); };
   window.addEventListener('afterprint', done);

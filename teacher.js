@@ -9,8 +9,8 @@ async function loadPeople(){
   const mine = people.find(p => p.id === S.me?.id); if(mine) S.me = {...S.me, ...mine};
 }
 async function loadTeacher(){
-  const [, en, cs] = await Promise.all([loadPeople(), API.allEntries(), API.allCounsels().catch(() => [])]);
-  S.t.entries = en; S.t.counsels = cs; reindex();
+  const [, en, cs, rf] = await Promise.all([loadPeople(), API.allEntries(), API.allCounsels().catch(() => []), API.allReflections().catch(() => [])]);
+  S.t.entries = en; S.t.counsels = cs; S.t.refls = rf; reindex();
 }
 function reindex(){
   const idx = {};
@@ -283,6 +283,9 @@ function openStudent(sid, sel=null){
         <label class="field" style="margin:0"><span>상태</span><select name="status"><option value="approved" ${s.status==='approved'?'selected':''}>재학</option><option value="graduated" ${s.status==='graduated'?'selected':''}>졸업</option></select></label>
         <button class="btn sm primary">저장</button></form>
       <p class="muted" style="font-size:12px;margin:6px 0 0">아이디: ${esc(s.login_id||'')}</p></details>
+    <details style="margin-top:14px"><summary style="cursor:pointer;font-size:14px;font-weight:700">🔍 마음 발견 · 🪞 성찰 기록 (편지·주간 돌아보기)</summary>
+      <div class="card" style="margin-top:8px">${insightsHTML(insightsFor(es, periodDates(cls)))}</div>
+      <div style="margin-top:10px">${reflectionsHTML((S.t.refls||[]).filter(r => r.student_id === sid), cls)}</div></details>
     ${cs.length ? `<details style="margin-top:14px" ${cs.some(c => ['new','seen'].includes(c.status)) ? 'open' : ''}><summary style="cursor:pointer;font-size:14px;font-weight:700">💬 상담 신청 ${cs.length}건</summary>${cs.map(c => counselCard(c, false)).join('')}</details>` : ''}
     <details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:13px">🔑 비밀번호 재설정</summary>
       <form id="reset-form" data-sid="${sid}" style="display:flex;gap:8px;margin-top:8px"><input class="inp" name="pin" minlength="6" required placeholder="새 비밀번호 (6자리 이상)" style="flex:1"><button class="btn sm primary">재설정</button></form></details>`, true);
@@ -332,7 +335,7 @@ document.addEventListener('click', async ev => {
   if(act === 'approve'){ a.disabled = true; return actDo(() => API.approve(a.dataset.id), '승인했어요'); }
   if(act === 'cfilter'){ S.t.cfilter[a.dataset.k] = a.dataset.v; return renderTeacher(); }
   if(act === 'print-student'){ const s = S.t.people.find(p => p.id === a.dataset.sid);
-    const mine = S.t.entries.filter(e => e.student_id === s.id); closeModal(); return printReport(s, mine, classOf(s.class_id)); }
+    const mine = S.t.entries.filter(e => e.student_id === s.id); closeModal(); return printReport(s, mine, classOf(s.class_id), (S.t.refls||[]).filter(r => r.student_id === s.id)); }
   if(act === 'approve-admin'){ a.disabled = true; return actDo(async () => { await API.approve(a.dataset.id); await API.setAdmin(a.dataset.id, true); }, '관리자로 승인했어요'); }
   if(act === 'set-admin'){ a.disabled = true; const v = a.dataset.v === '1'; return actDo(() => API.setAdmin(a.dataset.id, v), v ? '관리자로 지정했어요' : '관리자를 해제했어요'); }
   if(act === 'reject'){ a.disabled = true; return actDo(() => API.reject(a.dataset.id), '신청을 거절했어요'); }

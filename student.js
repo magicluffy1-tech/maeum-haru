@@ -12,8 +12,13 @@ function renderStudent(){
       <div class="stat"><div class="k">모은 마음사탕</div><div class="v">🍬 ${candies}</div><div class="k">미션 성공한 날</div></div>
       <div class="stat"><div class="k">마음이 맑아진 날</div><div class="v">☀️ ${ups}</div><div class="k">아침보다 저녁이 더 맑았던 날</div></div>
     </div>
+    ${letterHTML(cls, days, t)}
     <section class="card"><h2>${fmtDate(t)} · 오늘의 마음</h2>${todayHTML(todayE, di >= 0)}</section>
+    ${weeklyHTML(days, t, byDate)}
     <section class="card" id="counsel-card"><h2>💬 상담 신청</h2>${counselHTML(todayE)}</section>
+    <section class="card"><h2>🔍 나의 마음 발견</h2>
+      <p class="muted" style="font-size:13px;margin:-4px 0 8px">지금까지의 기록에서 찾은 내 마음의 패턴이에요. 맞는 것 같나요? 나는 어떤 사람인지 한번 생각해 봐요.</p>
+      ${insightsHTML(insightsFor(S.entries, days))}</section>
     <section class="card"><h2 style="display:flex;align-items:center;gap:8px">나의 마음 하루 30일 <button class="btn sm" data-act="print" style="margin-left:auto;font-family:Pretendard">📄 PDF 저장·인쇄</button></h2>
       ${calendarHTML(cls, byDate)}
       <div class="legend"><span>칸 = 아침 → 저녁 마음 날씨</span><span>▲▼ 마음 온도 변화</span><span>🍬 미션 성공</span><span>날짜를 누르면 자세히 볼 수 있어요</span></div>
@@ -102,7 +107,7 @@ async function onWeatherSubmit(f){
 }
 
 /* ===================================================================== 학생 이벤트 */
-async function startApp(){ [S.entries, S.counsels] = await Promise.all([API.myEntries(S.me.id), API.myCounsels(S.me.id).catch(() => [])]); renderStudent(); }
+async function startApp(){ [S.entries, S.counsels, S.refls] = await Promise.all([API.myEntries(S.me.id), API.myCounsels(S.me.id).catch(() => []), API.myReflections(S.me.id).catch(() => [])]); renderStudent(); }
 
 document.addEventListener('click', ev => {
   const wb = ev.target.closest('.wbtn');
@@ -168,7 +173,7 @@ document.addEventListener('click', async ev => {
   if(act === 'counsel-close'){ S.ui.counselOpen = false; return rerenderCounsel(); }
   if(act === 'counsel-refresh'){ S.counsels = await API.myCounsels(S.me.id); rerenderCounsel(); return toast('새로 불러왔어요'); }
   if(act === 'counsel-cancel'){ try{ await API.cancelCounsel(+a.dataset.id); S.counsels = await API.myCounsels(S.me.id); rerenderCounsel(); toast('신청을 취소했어요'); }catch(e){ toast(e.message); } return; }
-  if(act === 'print') return printReport(S.me, S.entries, classOf(S.me.class_id));
+  if(act === 'print') return printReport(S.me, S.entries, classOf(S.me.class_id), S.refls);
 });
 document.addEventListener('submit', async ev => {
   const f = ev.target; if(f.getAttribute('id') !== 'counsel-form') return;
@@ -181,4 +186,92 @@ document.addEventListener('submit', async ev => {
     S.ui.counselOpen = false; S.counsels = await API.myCounsels(S.me.id); renderStudent();
     toast(`${C_TARGET[c.target]}께 상담을 신청했어요 💌`);
   }catch(e){ err.textContent = e.message; btn.disabled = false; }
+});
+
+/* ===================================================================== 자기성찰 : 편지 · 주간 돌아보기 */
+function letterHTML(cls, days, t){
+  if(!days.length || t < days[0]) return '';
+  const key = cls.start_date, last = days[days.length-1], isEnd = t >= last;
+  const ls = reflOf(S.refls, 'letter_start', key), le = reflOf(S.refls, 'letter_end', key), u = S.ui;
+  const note = '<p class="muted" style="font-size:12px;margin:0 0 8px">✉️ 이 편지는 담임 선생님도 읽을 수 있어요.</p>';
+  if(!isEnd){
+    if(ls && !u.editLetter){
+      const left = days.filter(d => d > t).length;
+      return `<section class="card" style="padding:12px 14px"><div class="sealed"><span class="env">📮</span>
+        <div style="flex:1"><b>30일 뒤의 나에게 보낸 편지</b><div class="muted" style="font-size:13px">${md(last)} (30일째)에 열 수 있어요 · D-${left}</div></div>
+        <button class="btn ghost sm" data-act="letter-edit">고쳐 쓰기</button></div></section>`;
+    }
+    if(!u.letterOpen && !u.editLetter) return `<section class="card" style="padding:12px 14px"><div class="sealed"><span class="env">✉️</span>
+      <div style="flex:1"><b>30일 뒤의 나에게 편지를 써 볼까요?</b><div class="muted" style="font-size:13px">30일 동안 어떤 내가 되고 싶은지, 지금의 마음을 담아 보세요. 30일째에 열려요.</div></div>
+      <button class="btn primary sm" data-act="letter-open">편지 쓰기</button></div></section>`;
+    return `<section class="card"><form id="letter-start-form" class="letter"><div class="lt">📮 30일 뒤의 나에게</div>
+      <p class="muted" style="font-size:13px;margin:0 0 8px">30일 뒤의 나는 어떤 모습이면 좋을까요? 지금의 고민, 바라는 것, 응원의 말을 자유롭게 적어요.</p>
+      <textarea name="text" maxlength="1000" required style="min-height:120px" placeholder="30일 뒤의 ○○에게,">${esc(ls?.answers.text || '')}</textarea>${note}
+      <div style="display:flex;gap:8px"><button class="btn primary" style="flex:1">편지 봉인하기 📮</button><button type="button" class="btn" data-act="letter-cancel">닫기</button></div></form></section>`;
+  }
+  // 30일째 이후 : 편지 열기 + 답장 + 따뜻한 말
+  const warm = le?.answers.warm || ['', '', '', ''];
+  const head = `<div class="lt">📬 30일 전의 내가 보낸 편지</div><p>${ls ? esc(ls.answers.text) : '<span class="muted">30일 전에는 편지를 쓰지 않았어요. 대신 지금의 나에게 말을 걸어 봐요.</span>'}</p>`;
+  if(le && !u.editLetter) return `<section class="card"><h2>🎉 30일을 마쳤어요!</h2><div class="letter">${head}
+    <div class="lt">💌 30일 전의 나에게</div><p>${esc(le.answers.reply || '')}</p>
+    ${warm.filter(Boolean).length ? `<div class="lt">🤍 나에게 들려주고 싶은 따뜻한 말</div><ul class="warm">${warm.filter(Boolean).map(w => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
+    <p style="text-align:right;margin:8px 0 0"><button class="btn ghost sm" data-act="letter-edit">고쳐 쓰기</button></p></div></section>`;
+  return `<section class="card"><h2>🎉 30일을 마쳤어요! 편지가 열렸어요</h2><form id="letter-end-form" class="letter">${head}
+    <p class="muted" style="font-size:13px;margin:0 0 8px">아래 달력과 '나의 마음 발견'을 함께 보면서, 30일 동안의 나를 돌아봐요.</p>
+    <div class="lt">💌 30일 전의 나에게 답장</div>
+    <textarea name="reply" maxlength="1000" required style="min-height:110px" placeholder="30일 전의 나에게, 30일 동안 나는…">${esc(le?.answers.reply || '')}</textarea>
+    <div class="lt">🤍 나에게 들려주고 싶은 따뜻한 말</div>
+    ${[0,1,2,3].map(i => `<input class="inp" name="warm${i}" maxlength="80" value="${esc(warm[i]||'')}" placeholder="☐ 예: 넌 생각보다 훨씬 다정한 사람이야" style="margin-bottom:6px">`).join('')}
+    ${note}<button class="btn primary big">저장하기</button></form></section>`;
+}
+
+function weeklyHTML(days, t, byDate){
+  const wk = weekKey(t), u = S.ui;
+  const wDays = days.filter(d => d >= wk && d <= addDays(wk, 6) && d <= t);
+  const mine = reflOf(S.refls, 'weekly', wk);
+  const isTime = [5, 6, 0].includes(dow(t)) || t === days[days.length-1];
+  const past = (S.refls || []).filter(r => r.kind === 'weekly' && r.ref_key !== wk).sort((a,b) => b.ref_key.localeCompare(a.ref_key));
+  const pastHTML = past.length ? `<details style="margin-top:10px"><summary class="muted" style="cursor:pointer;font-size:13px">지난 돌아보기 ${past.length}개</summary>
+    ${past.map(w => `<div class="wk"><div class="lt">🗓️ ${md(w.ref_key)} 주</div>${W_Q.map(([k,q]) => w.answers[k] ? `<div class="wq"><span>${q}</span>${esc(w.answers[k])}</div>` : '').join('')}</div>`).join('')}</details>` : '';
+  if(!wDays.length && !past.length) return '';
+  let body;
+  if(mine && !u.editWeekly){
+    body = `<div class="wk" style="margin-top:0">${W_Q.map(([k,q]) => mine.answers[k] ? `<div class="wq"><span>${q}</span>${esc(mine.answers[k])}</div>` : '').join('')}
+      <p style="text-align:right;margin:4px 0 0"><button class="btn ghost sm" data-act="weekly-edit">고쳐 쓰기</button></p></div>`;
+  } else if(isTime && wDays.length){
+    const es = wDays.map(d => byDate[d]).filter(Boolean), chs = es.map(change).filter(Boolean);
+    body = `<p class="muted" style="font-size:13px;margin:-4px 0 6px">한 주를 마무리하며 이번 주의 나를 돌아봐요.</p>
+      ${lineChart(wDays, [{name:'아침', color:'var(--am)', values:wDays.map(d => tempOf(byDate[d],'am'))},{name:'저녁', color:'var(--pm)', values:wDays.map(d => tempOf(byDate[d],'pm'))}], 150)}
+      <div class="wstats"><span>기록 ${es.length}일</span><span>☀️ 맑아진 날 ${chs.filter(c => c.k==='up').length}</span><span>🌧️ 무거워진 날 ${chs.filter(c => c.k==='down').length}</span><span>🍬 미션 성공 ${es.filter(e => e.mission_result==='done').length}</span></div>
+      <form id="weekly-form" data-wk="${wk}">${W_Q.map(([k,q]) => `<div class="wq-in"><label>${q}</label><textarea name="${k}" maxlength="300">${esc(mine?.answers[k] || '')}</textarea></div>`).join('')}
+      <button class="btn primary big">이번 주 돌아보기 저장</button></form>`;
+  } else {
+    body = `<div class="note">🗓️ <b>금요일 종례</b> 때 이번 주의 나를 돌아보는 시간을 가져요.</div>`;
+  }
+  return `<section class="card"><h2>🗓️ 이번 주 돌아보기</h2>${body}${pastHTML}</section>`;
+}
+
+document.addEventListener('click', ev => {
+  const a = ev.target.closest('[data-act]'); if(!a) return;
+  const act = a.dataset.act;
+  if(act === 'letter-open'){ S.ui.letterOpen = true; return renderStudent(); }
+  if(act === 'letter-cancel'){ S.ui.letterOpen = false; S.ui.editLetter = false; return renderStudent(); }
+  if(act === 'letter-edit'){ S.ui.editLetter = true; return renderStudent(); }
+  if(act === 'weekly-edit'){ S.ui.editWeekly = true; return renderStudent(); }
+});
+document.addEventListener('submit', async ev => {
+  const f = ev.target, id = f.getAttribute('id');
+  if(!['letter-start-form','letter-end-form','weekly-form'].includes(id)) return;
+  ev.preventDefault();
+  const el = f.elements, key = classOf(S.me.class_id).start_date;
+  const btn = f.querySelector('button.primary'); btn.disabled = true;
+  try{
+    if(id === 'letter-start-form') await API.saveReflection('letter_start', key, {text:el.text.value.trim()});
+    if(id === 'letter-end-form') await API.saveReflection('letter_end', key, {reply:el.reply.value.trim(), warm:[0,1,2,3].map(i => el['warm'+i].value.trim())});
+    if(id === 'weekly-form') await API.saveReflection('weekly', f.dataset.wk, Object.fromEntries(W_Q.map(([k]) => [k, el[k].value.trim()])));
+    S.refls = await API.myReflections(S.me.id);
+    Object.assign(S.ui, {letterOpen:false, editLetter:false, editWeekly:false});
+    renderStudent();
+    toast(id === 'letter-start-form' ? '편지를 봉인했어요 📮 30일째에 만나요!' : id === 'weekly-form' ? '이번 주 돌아보기를 저장했어요 🗓️' : '30일의 기록을 마무리했어요 🎉');
+  }catch(e){ toast(e.message); btn.disabled = false; }
 });

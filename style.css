@@ -291,3 +291,33 @@ table.hm{border-collapse:separate;border-spacing:0;font-size:12px}
   .pr-tbl .em{white-space:nowrap;font-size:12px}
   .pr-tbl .sub{color:#666;font-size:9px}
 }
+
+/* ---------- 자기성찰 ---------- */
+.ins{list-style:none;margin:0;padding:0}
+.ins li{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px dashed var(--line);font-size:15px}
+.ins li:last-child{border-bottom:0}
+.ins li>span{font-size:22px;line-height:1.2}
+.ins b{color:var(--rose-d)}
+.letter{background:linear-gradient(180deg,#FFF9EF,#FFF3E4);border:1.5px solid #EBD3BC;border-radius:16px;padding:16px 18px;position:relative}
+.letter .lt{font-family:Jua,sans-serif;font-size:17px;color:var(--brown);margin:4px 0 6px}
+.letter p{white-space:pre-wrap;margin:0 0 10px;line-height:1.7}
+.letter textarea{background:#fffdf9}
+.warm{margin:0;padding-left:20px}.warm li{margin:3px 0}
+.sealed{display:flex;align-items:center;gap:12px;background:#FFF6EA;border:1.5px dashed #E2C7A8;border-radius:14px;padding:12px 14px}
+.sealed .env{font-size:34px}
+.wk{border:1.5px solid var(--line);border-radius:14px;padding:12px 14px;margin-top:10px;background:#fff}
+.wk .lt{font-weight:800;color:var(--brown);margin-bottom:6px}
+.wq{font-size:14px;margin:6px 0}.wq span{display:block;font-size:12px;color:var(--sub);font-weight:700}
+.wq-in{margin-bottom:10px}.wq-in label{display:block;font-size:14px;font-weight:700;color:var(--brown);margin-bottom:4px}
+.wq-in textarea{min-height:56px;margin:0}
+.wstats{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 12px}
+.wstats span{background:#F6F0E9;border-radius:99px;padding:4px 10px;font-size:13px;font-weight:700}
+@media print{
+  .pr-break{page-break-before:always}
+  #print-area .ins li{padding:4px 0;font-size:10.5px}
+  #print-area .ins li>span{font-size:13px}
+  #print-area .letter{padding:8px 10px;page-break-inside:avoid}
+  #print-area .letter .lt{font-size:12px}
+  #print-area .wk{padding:6px 10px;page-break-inside:avoid}
+  #print-area .wq{font-size:10px;margin:3px 0}
+}
