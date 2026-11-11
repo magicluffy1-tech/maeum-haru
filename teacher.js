@@ -61,9 +61,13 @@ function tToday(){
   const ch = rows.map(r => change(r.e)).filter(Boolean);
   const cnt = k => ch.filter(c => c.k === k).length;
   const withM = rows.filter(r => r.e?.mission_id), done = withM.filter(r => r.e.mission_result === 'done').length, pledged = withM.filter(r => r.e.pledge).length;
-  const dist = k => [1,2,3,4,5].map(i => rows.filter(r => r.e?.[k+'_weather'] === i).length);
-  const dA = dist('am'), dP = dist('pm'), mx = Math.max(1, ...dA, ...dP);
-  const distRow = (lbl, arr) => `<div class="rl">${lbl}</div>` + arr.map((v,i) => `<div class="col"><span class="n">${v}</span><div class="bar" style="height:${8+v/mx*70}px;background:${WEATHER[i+1].c};border:1px solid rgba(0,0,0,.06)"></div></div>`).join('');
+  // 이름 칩 : 전체 보기면 반 표시, 한 반이면 번호 표시
+  const nm = s => S.t.classId === 'all' ? `<small>${classOf(s.class_id)?.grade}-${classOf(s.class_id)?.class_no}</small>${esc(s.name)}` : `<small>${s.number}</small>${esc(s.name)}`;
+  const chips = list => list.length ? list.map(r => `<button class="nchip" data-act="student" data-sid="${r.s.id}" title="${esc(r.s.name)}">${nm(r.s)}${r.t != null ? `<i>${r.t}°</i>` : ''}</button>`).join('') : '<span class="muted" style="font-size:12px">–</span>';
+  const who = (k, w) => rows.filter(r => r.e?.[k+'_weather'] === w).map(r => ({...r, t:tempOf(r.e, k)})).sort((a,b) => b.t - a.t);
+  const none = k => rows.filter(r => !r.e?.[k+'_weather']);
+  const distCell = (k, w) => { const l = who(k, w); return `<td><div class="dc"><b class="dn">${l.length}</b><div class="nchips">${chips(l)}</div></div></td>`; };
+  const byChg = k => rows.filter(r => change(r.e)?.k === k).map(r => ({...r, t:null}));
   const concerns = studs.map(s => ({ s, c:concernsFor(s, D) })).filter(x => x.c.length);
   const isPeriod = studs.some(s => periodDates(classOf(s.class_id)).includes(D));
   const dDelta = (amAvg!=null && pmAvg!=null) ? pmAvg - amAvg : null;
@@ -78,19 +82,27 @@ function tToday(){
   <div class="grid2">
     <div class="card"><h2>아침 → 저녁, 마음의 변화</h2>
       ${ch.length ? `<div class="stack">${['up','same','down'].map(k => cnt(k) ? `<div class="${k}" style="width:${cnt(k)/ch.length*100}%">${cnt(k)}</div>` : '').join('')}</div>
-      <div class="lg"><span><i style="background:var(--up)"></i>맑아짐 ${cnt('up')}명</span><span><i style="background:#BBAEA3"></i>비슷함 ${cnt('same')}명</span><span><i style="background:var(--down)"></i>무거워짐 ${cnt('down')}명</span></div>
+      <div class="chg-list">
+        <div><span class="cl up">☀️ 맑아짐 ${cnt('up')}</span><div class="nchips">${chips(byChg('up'))}</div></div>
+        <div><span class="cl same">＝ 비슷함 ${cnt('same')}</span><div class="nchips">${chips(byChg('same'))}</div></div>
+        <div><span class="cl down">🌧️ 무거워짐 ${cnt('down')}</span><div class="nchips">${chips(byChg('down'))}</div></div>
+      </div>
       <p class="muted" style="font-size:12px;margin:8px 0 0">아침·저녁을 모두 기록한 ${ch.length}명 기준 · 마음 온도 10° 이상 차이를 변화로 봐요</p>`
       : '<p class="muted">아침과 저녁을 모두 기록한 학생이 아직 없어요.</p>'}
     </div>
-    <div class="card"><h2>마음 날씨 분포</h2>
-      <div class="dist"><div></div>${[1,2,3,4,5].map(i => `<div class="col"><span class="em">${WEATHER[i].e}</span></div>`).join('')}
-        ${distRow('아침', dA)}${distRow('저녁', dP)}</div>
-    </div>
-  </div>
-  <div class="card"><h2>🔎 살펴볼 학생 <span class="muted" style="font-size:14px;font-family:Pretendard">${concerns.length}명</span></h2>
+    <div class="card"><h2>🔎 살펴볼 학생 <span class="muted" style="font-size:14px;font-family:Pretendard">${concerns.length}명</span></h2>
     ${concerns.length ? `<div class="concern">${concerns.map(x => `<button class="cc" data-act="student" data-sid="${x.s.id}"><b>${esc(sLabel(x.s))}</b>${x.c.map(t => `<span class="tag">${t}</span>`).join('')}</button>`).join('')}</div>
     <p class="muted" style="font-size:12px;margin:10px 0 0">'이유 살펴보기'는 특정 단어가 포함된 기록이에요. 자동 판단이니 꼭 직접 읽어 보시고, 필요하면 상담 체계와 연계해 주세요.</p>`
     : '<p class="muted">특별히 살펴볼 학생이 없어요.</p>'}
+    </div>
+  </div>
+  <div class="card"><h2>🌤️ 마음 날씨 분포 <span class="muted" style="font-size:13px;font-family:Pretendard">이름을 누르면 그 학생의 기록을 볼 수 있어요 · 옆 숫자는 마음 온도</span></h2>
+    <div class="tbl-wrap"><table class="dtbl"><thead><tr><th style="width:110px">마음 날씨</th><th>🌅 아침 조회</th><th>🌇 저녁 종례</th></tr></thead><tbody>
+      ${[1,2,3,4,5].map(w => `<tr style="background:${WEATHER[w].c}55"><th><span style="font-size:26px">${WEATHER[w].e}</span><div style="font-size:13px">${WEATHER[w].n}</div></th>${distCell('am', w)}${distCell('pm', w)}</tr>`).join('')}
+      <tr class="dnone"><th><span style="font-size:20px">○</span><div style="font-size:13px">아직 기록 전</div></th>
+        <td><div class="dc"><b class="dn">${none('am').length}</b><div class="nchips">${chips(none('am'))}</div></div></td>
+        <td><div class="dc"><b class="dn">${none('pm').length}</b><div class="nchips">${chips(none('pm'))}</div></div></td></tr>
+    </tbody></table></div>
   </div>
   <div class="card"><h2>학생별 기록 · ${fmtDate(D)}</h2>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>학생</th><th>아침</th><th>저녁</th><th>변화</th><th>왜 그런 마음이었나요?</th><th>오늘의 미션</th></tr></thead><tbody>
