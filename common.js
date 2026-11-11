@@ -123,6 +123,7 @@ const RealAPI = {
   async allCounsels(){ return chk(await sb.from('counsel_requests').select('*').order('created_at', {ascending:false}).limit(1000)); },
   requestCounsel(f){ return this._rpc('request_counsel', {p_target:f.target, p_category:f.category, p_urgency:f.urgency, p_time:f.time, p_content:f.content}); },
   cancelCounsel(id){ return this._rpc('cancel_counsel', {p_id:id}); },
+  deleteCounsel(id){ return this._rpc('delete_counsel', {p_id:id}); },
   updateCounsel(id, status, note){ return this._rpc('update_counsel', {p_id:id, p_status:status, p_note:note}); },
   async myReflections(uid){ return chk(await sb.from('reflections').select('*').eq('student_id', uid).order('ref_key')); },
   async allReflections(){ return chk(await sb.from('reflections').select('*').order('ref_key').limit(5000)); },
@@ -193,8 +194,7 @@ function buildDemo(){
   const ago = h => new Date(Date.now() - h*3600e3).toISOString();
   const counsels = [
     {id:1, student_id:'s-2-1-3', class_id:'2-1', entry_date:t, target:'counselor', category:'친구 관계', urgency:'today', preferred_time:'점심시간', content:'요즘 친구들이 저만 빼고 다니는 것 같아서 이야기하고 싶어요.', status:'new', teacher_note:null, created_at:ago(1)},
-    {id:2, student_id:'s-1-1-4', class_id:'1-1', entry_date:t, target:'homeroom', category:'공부·성적', urgency:'week', preferred_time:'방과 후', content:'수학 공부 방법을 여쭤보고 싶어요.', status:'seen', teacher_note:'목요일 방과 후에 교실에서 만나자!', created_at:ago(20)},
-    {id:3, student_id:'s-1-1-1', class_id:'1-1', entry_date:addDays(t,-3), target:'homeroom', category:'학교생활', urgency:'anytime', preferred_time:'쉬는 시간', content:'모둠 활동 때 역할 나누기가 어려워요.', status:'done', teacher_note:'이야기 나눠줘서 고마워 😊', created_at:ago(72)},
+    {id:2, student_id:'s-1-1-4', class_id:'1-1', entry_date:t, target:'homeroom', category:'공부·성적', urgency:'week', preferred_time:'방과 후', content:'수학 공부 방법을 여쭤보고 싶어요.', status:'new', teacher_note:null, created_at:ago(20)},
   ];
   const wk = weekKey(t), pw = addDays(wk, -7);
   const reflections = [
@@ -265,7 +265,8 @@ const DemoAPI = (() => {
     async requestCounsel(f){ await wait(); const c = {id:Math.max(0,...db.counsels.map(x=>x.id))+1, student_id:me.id, class_id:me.class_id, entry_date:todayKST(),
         target:f.target, category:f.category, urgency:f.urgency, preferred_time:f.time, content:f.content, status:'new', teacher_note:null, created_at:new Date().toISOString()};
       db.counsels.push(c); return {...c}; },
-    async cancelCounsel(id){ await wait(); const c = db.counsels.find(x => x.id===id); if(c.status!=='new') throw new Error('이미 선생님이 확인한 신청은 취소할 수 없어요.'); c.status = 'canceled'; },
+    async cancelCounsel(id){ await wait(); if(!db.counsels.some(x => x.id===id)) throw new Error('이미 선생님이 확인한 신청이에요.'); db.counsels = db.counsels.filter(x => x.id!==id); },
+    async deleteCounsel(id){ await wait(); db.counsels = db.counsels.filter(x => x.id!==id); },
     async updateCounsel(id, status, note){ await wait(); Object.assign(db.counsels.find(x => x.id===id), {status, teacher_note:note, handled_at:new Date().toISOString()}); },
   };
 })();

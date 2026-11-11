@@ -140,27 +140,29 @@ document.addEventListener('submit', async ev => {
 function counselHTML(){
   const u = S.ui, f = u.cf || (u.cf = {target:'homeroom', urgency:'week', category:'', time:''});
   const opt = (k, v, label) => `<button type="button" class="opt ${f[k]===v?'on':''}" data-opt="${k}" data-v="${esc(v)}">${label}</button>`;
-  const list = (S.counsels || []).filter(c => c.status !== 'canceled').slice(0, 6);
+  const list = (S.counsels || []).filter(c => ['new','seen'].includes(c.status)).slice(0, 6);
   const form = u.counselOpen ? `<form id="counsel-form">
       <div class="olbl">누구와 이야기하고 싶나요?</div><div class="optrow">${Object.entries(C_TARGET).map(([k,v]) => opt('target', k, v)).join('')}</div>
       <div class="olbl">어떤 이야기인가요?</div><div class="optrow">${C_CATS.map(c => opt('category', c, c)).join('')}</div>
       <div class="olbl">언제 만나고 싶나요?</div><div class="optrow">${Object.entries(C_URGENCY).map(([k,v]) => opt('urgency', k, v)).join('')}</div>
       <div class="olbl">편한 시간</div><div class="optrow">${C_TIMES.map(c => opt('time', c, c)).join('')}</div>
       <textarea name="content" maxlength="500" placeholder="선생님께 미리 전하고 싶은 말이 있으면 적어 주세요. (비워 둬도 괜찮아요)"></textarea>
-      <p class="muted" style="font-size:12px;margin:-4px 0 8px">🔒 신청 내용은 선생님들만 볼 수 있어요. 지금 많이 힘들다면 바로 선생님께 직접 말하거나 청소년상담전화 <b>1388</b>에 연락할 수 있어요.</p>
+      <p class="muted" style="font-size:12px;margin:-4px 0 8px">🔒 신청 내용은 선생님들만 볼 수 있고, <b>선생님이 확인하면 안전하게 지워져요.</b> 지금 많이 힘들다면 바로 선생님께 직접 말하거나 청소년상담전화 <b>1388</b>에 연락할 수 있어요.</p>
       <div class="err"></div>
       <div style="display:flex;gap:8px"><button class="btn primary" style="flex:1">상담 신청하기</button><button type="button" class="btn" data-act="counsel-close">닫기</button></div>
     </form>`
     : `<button class="btn primary big" data-act="counsel-open">💬 선생님과 이야기하고 싶어요</button>`;
-  return form + (list.length ? `<div style="margin-top:14px;display:flex;align-items:center"><b style="font-size:14px">내 신청</b>
+  return form + (list.length ? `<div style="margin-top:14px;display:flex;align-items:center"><b style="font-size:14px">선생님 확인을 기다리는 신청</b>
       <button class="btn ghost sm" data-act="counsel-refresh" style="margin-left:auto">🔄 새로고침</button></div>
     ${list.map(c => `<div class="creq">
       <div class="hd"><span class="cst ${c.status}">${C_STATUS[c.status]}</span><b>${C_TARGET[c.target]}</b><span class="muted">${esc(c.category)} · ${C_URGENCY[c.urgency]}${c.preferred_time ? ' · '+esc(c.preferred_time) : ''}</span>
         <span class="muted" style="margin-left:auto">${md(c.entry_date)}</span></div>
       ${c.content ? `<p class="ct">${esc(c.content)}</p>` : ''}
       ${c.teacher_note ? `<div class="reply">💌 선생님: ${esc(c.teacher_note)}</div>` : ''}
-      ${c.status === 'new' ? `<div style="text-align:right;margin-top:6px"><button class="btn ghost sm" data-act="counsel-cancel" data-id="${c.id}">신청 취소</button></div>` : ''}
-    </div>`).join('')}` : '');
+      <div style="text-align:right;margin-top:6px"><button class="btn ghost sm" data-act="counsel-cancel" data-id="${c.id}">신청 취소</button></div>
+    </div>`).join('')}
+    <p class="muted" style="font-size:12px;margin:8px 0 0">선생님이 확인하면 이 목록에서 사라지고, 선생님이 따로 불러 주실 거예요.</p>`
+    : (S.ui.hadCounsel ? '<p class="muted" style="font-size:13px;margin:10px 0 0">✅ 선생님이 신청을 확인했어요. 곧 이야기 나눠요!</p>' : ''));
 }
 function rerenderCounsel(){ const el = $('#counsel-card'); if(el) el.innerHTML = '<h2>💬 상담 신청</h2>' + counselHTML(); }
 
@@ -171,8 +173,8 @@ document.addEventListener('click', async ev => {
   const act = a.dataset.act;
   if(act === 'counsel-open'){ S.ui.counselOpen = true; S.ui.cf = null; rerenderCounsel(); return $('#counsel-card').scrollIntoView({behavior:'smooth', block:'start'}); }
   if(act === 'counsel-close'){ S.ui.counselOpen = false; return rerenderCounsel(); }
-  if(act === 'counsel-refresh'){ S.counsels = await API.myCounsels(S.me.id); rerenderCounsel(); return toast('새로 불러왔어요'); }
-  if(act === 'counsel-cancel'){ try{ await API.cancelCounsel(+a.dataset.id); S.counsels = await API.myCounsels(S.me.id); rerenderCounsel(); toast('신청을 취소했어요'); }catch(e){ toast(e.message); } return; }
+  if(act === 'counsel-refresh'){ const before = (S.counsels||[]).length; S.counsels = await API.myCounsels(S.me.id); if(S.counsels.length < before) S.ui.hadCounsel = true; rerenderCounsel(); return toast('새로 불러왔어요'); }
+  if(act === 'counsel-cancel'){ if(!confirm('상담 신청을 취소할까요?')) return; try{ await API.cancelCounsel(+a.dataset.id); S.counsels = await API.myCounsels(S.me.id); rerenderCounsel(); toast('신청을 취소했어요'); }catch(e){ toast(e.message); } return; }
   if(act === 'print') return printReport(S.me, S.entries, classOf(S.me.class_id), S.refls);
 });
 document.addEventListener('submit', async ev => {

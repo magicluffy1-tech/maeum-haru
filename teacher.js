@@ -157,7 +157,7 @@ function counselCard(c, withName=true){
   const s = (S.t.people||[]).find(p => p.id === c.student_id);
   const e = S.t.idx[c.student_id]?.[c.entry_date];
   return `<div class="creq ${c.status}">
-    <div class="hd"><span class="cst ${c.status}">${{new:'새 신청', seen:'확인함', done:'상담 완료', canceled:'학생이 취소'}[c.status]}</span>
+    <div class="hd"><span class="cst new">새 신청</span>
       ${withName ? `<b style="cursor:pointer" data-act="student" data-sid="${c.student_id}">${s ? `${classOf(s.class_id)?.name||''} ${s.number}번 ${esc(s.name)}` : '알 수 없음'}</b>` : ''}
       <span>→ <b>${C_TARGET[c.target]}</b></span>
       <span class="${c.urgency==='today'?'urg-today':'muted'}">${C_URGENCY[c.urgency]}</span>
@@ -165,11 +165,9 @@ function counselCard(c, withName=true){
       <span class="muted" style="margin-left:auto">${fmtTime(c.created_at)}</span></div>
     ${e?.am_weather ? `<div class="muted" style="font-size:12px;margin-top:4px">그날 아침 마음: ${WEATHER[e.am_weather].e} ${WEATHER[e.am_weather].n} ${tempOf(e,'am')}°${e.am_reason ? ' · “'+esc(e.am_reason)+'”' : ''}</div>` : ''}
     ${c.content ? `<p class="ct">${esc(c.content)}</p>` : '<p class="ct muted">(남긴 말 없음)</p>'}
-    ${c.status === 'canceled' ? '' : `<form class="cform" data-id="${c.id}" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-      <input class="inp" name="note" maxlength="300" value="${esc(c.teacher_note||'')}" placeholder="학생에게 남길 말 (예: 목요일 점심에 상담실에서 만나요)" style="flex:1;min-width:220px">
-      ${c.status === 'new' ? `<button class="btn sm" name="st" value="seen">확인함</button>` : ''}
-      ${c.status !== 'done' ? `<button class="btn sm primary" name="st" value="done">상담 완료</button>` : `<button class="btn sm" name="st" value="done">말 저장</button><button class="btn sm ghost" name="st" value="seen">완료 취소</button>`}
-    </form>`}
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+      <span class="muted" style="font-size:12px;flex:1">확인을 누르면 이 신청 내용은 완전히 지워져요. 필요한 내용은 학교 상담 기록에 먼저 옮겨 두세요.</span>
+      <button class="btn sm primary" data-act="counsel-ok" data-id="${c.id}">✅ 확인 (삭제)</button></div>
   </div>`;
 }
 function tCounsel(){
@@ -177,17 +175,17 @@ function tCounsel(){
   const ids = new Set(tStudents().map(s => s.id));
   const list = (T.counsels||[]).filter(c => (T.classId === 'all' || ids.has(c.student_id))
     && (f.target === 'all' || c.target === f.target)
-    && (f.status === 'all' || (f.status === 'open' ? ['new','seen'].includes(c.status) : c.status === f.status)));
+    && c.status !== 'canceled');
   const chip = (k, v, label) => `<button class="chip ${f[k]===v?'on':''}" data-act="cfilter" data-k="${k}" data-v="${v}">${label}</button>`;
   return `<div class="filters" style="margin-bottom:4px">
       <div class="chips">${[['all','전체'], ...S.classes.map(c => [c.id, c.name])].map(([k,v]) => `<button class="chip ${T.classId===k?'on':''}" data-act="cls" data-v="${k}">${v}</button>`).join('')}</div>
       <button class="btn sm" data-act="refresh" title="새로 불러오기" style="margin-left:auto">🔄</button></div>
     <div class="filters" style="margin-top:8px">
       <div class="chips">${chip('target','all','모든 대상')}${chip('target','homeroom','담임 선생님')}${chip('target','counselor','상담 선생님')}</div>
-      <div class="chips" style="margin-left:auto">${chip('status','open','진행 중')}${chip('status','new','새 신청')}${chip('status','done','완료')}${chip('status','all','전체')}</div></div>
+</div>
     <div class="card"><h2>💬 상담 신청 <span class="muted" style="font-size:14px;font-family:Pretendard">${list.length}건</span></h2>
       ${list.length ? list.map(c => counselCard(c)).join('') : '<p class="muted">해당하는 상담 신청이 없어요.</p>'}
-      <p class="muted" style="font-size:12px;margin:12px 0 0">'확인함'을 누르면 학생 화면에 "선생님이 확인했어요"로 보여요. 남긴 말은 학생이 볼 수 있으니, 상담 내용 기록은 학교 상담 기록 양식에 따로 남겨 주세요.</p></div>`;
+      <p class="muted" style="font-size:12px;margin:12px 0 0">🔒 학생의 신청 내용은 확인하는 즉시 DB에서 완전히 삭제돼요. 상담 후 기록은 학교 상담 기록 양식에 남겨 주세요.</p></div>`;
 }
 
 function tApprove(){
@@ -348,6 +346,15 @@ document.addEventListener('click', async ev => {
   if(act === 'grad-del-cancel'){ S.ui.gradArm = false; return renderTeacher(); }
   if(act === 'grad-del-go'){ a.disabled = true; S.ui.gradArm = false;
     try{ const n = await API.deleteGraduates(); await loadTeacher(); renderTeacher(); toast(`졸업생 ${n}명의 기록을 삭제했어요`); }catch(e){ toast(e.message); } return; }
+  if(act === 'counsel-ok'){
+    if(!confirm('이 상담 신청을 확인하고 삭제할까요? 삭제한 내용은 되돌릴 수 없어요.')) return;
+    a.disabled = true;
+    try{ await API.deleteCounsel(+a.dataset.id); S.t.counsels = await API.allCounsels();
+      const sid = $('#modal [data-act=print-student]')?.dataset.sid, inModal = !$('#modal').classList.contains('hidden');
+      renderTeacher(); if(inModal && sid) openStudent(sid); toast('확인했어요. 신청 내용을 삭제했어요'); }
+    catch(e){ toast(e.message); a.disabled = false; }
+    return;
+  }
   if(act === 'cfilter'){ S.t.cfilter[a.dataset.k] = a.dataset.v; return renderTeacher(); }
   if(act === 'print-student'){ const s = S.t.people.find(p => p.id === a.dataset.sid);
     const mine = S.t.entries.filter(e => e.student_id === s.id); closeModal(); return printReport(s, mine, classOf(s.class_id), (S.t.refls||[]).filter(r => r.student_id === s.id)); }
