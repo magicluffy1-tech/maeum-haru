@@ -127,6 +127,8 @@ const RealAPI = {
   updateCounsel(id, status, note){ return this._rpc('update_counsel', {p_id:id, p_status:status, p_note:note}); },
   async myReflections(uid){ return chk(await sb.from('reflections').select('*').eq('student_id', uid).order('ref_key')); },
   async allReflections(){ return chk(await sb.from('reflections').select('*').order('ref_key').limit(5000)); },
+  async concernConfig(){ const r = chk(await sb.from('concern_settings').select('value').eq('id', 1).maybeSingle()); return r?.value || {}; },
+  async saveConcernConfig(v){ chk(await sb.from('concern_settings').update({value:v, updated_at:new Date().toISOString()}).eq('id', 1)); },
   deleteStudent(id){ return this._rpc('delete_student', {p_id:id}); },
   deleteGraduates(){ return this._rpc('delete_graduates', {}); },
   saveReflection(kind, ref, answers){ return this._rpc('save_reflection', {p_kind:kind, p_ref:ref, p_answers:answers}); },
@@ -191,6 +193,14 @@ function buildDemo(){
   profiles.push({id:'p-1', role:'student', login_id:'newbie1', class_id:'1-1', number:9, name:'남궁별', status:'pending', created_at:new Date().toISOString()},
                 {id:'p-2', role:'student', login_id:'newbie2', class_id:'2-1', number:9, name:'제갈솔', status:'pending', created_at:new Date().toISOString()},
                 {id:'p-3', role:'teacher', login_id:'coteacher', name:'부담임 선생님', status:'pending', created_at:new Date().toISOString()});
+  // 체험용 예시 : 평소보다 확 낮아진 학생, 며칠째 기록이 없는 학생
+  const pastDays = days.filter(d => d < t);
+  pastDays.slice(-2).forEach(d => { const e = entries.find(x => x.student_id==='s-1-1-2' && x.entry_date===d);
+    if(e) Object.assign(e, {am_weather:3, am_temp:45, pm_weather:3, pm_temp:40, pm_reason:'그냥 다 귀찮아요'}); });
+  entries.filter(x => x.student_id==='s-1-1-2' && x.entry_date < pastDays[pastDays.length-2]).forEach(e => { e.am_weather = 1; e.am_temp = 88; if(e.pm_weather){ e.pm_weather = 1; e.pm_temp = 92; } });
+  { const i = entries.findIndex(x => x.student_id==='s-1-1-2' && x.entry_date===t); if(i >= 0) entries.splice(i, 1); }
+  const missDays = new Set([...pastDays.slice(-3), t]);
+  for(let i = entries.length - 1; i >= 0; i--) if(entries[i].student_id==='s-3-1-5' && missDays.has(entries[i].entry_date)) entries.splice(i, 1);
   const ago = h => new Date(Date.now() - h*3600e3).toISOString();
   const counsels = [
     {id:1, student_id:'s-2-1-3', class_id:'2-1', entry_date:t, target:'counselor', category:'친구 관계', urgency:'today', preferred_time:'점심시간', content:'요즘 친구들이 저만 빼고 다니는 것 같아서 이야기하고 싶어요.', status:'new', teacher_note:null, created_at:ago(1)},
@@ -250,6 +260,8 @@ const DemoAPI = (() => {
     async updateClass(id, f){ Object.assign(db.classes.find(c => c.id===id), f); },
     async resetPin(){ await wait(); },
     subscribe(){},
+    async concernConfig(){ init(); return structuredClone(db.ccfg || {}); },
+    async saveConcernConfig(v){ await wait(); db.ccfg = v; },
     async deleteStudent(id){ await wait(); const keep = x => x.student_id !== id;
       db.profiles = db.profiles.filter(p => p.id !== id); db.entries = db.entries.filter(keep); db.counsels = db.counsels.filter(keep); db.reflections = db.reflections.filter(keep); },
     async deleteGraduates(){ await wait(); const ids = db.profiles.filter(p => p.role==='student' && p.status==='graduated').map(p => p.id);

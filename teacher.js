@@ -9,8 +9,8 @@ async function loadPeople(){
   const mine = people.find(p => p.id === S.me?.id); if(mine) S.me = {...S.me, ...mine};
 }
 async function loadTeacher(){
-  const [, en, cs, rf] = await Promise.all([loadPeople(), API.allEntries(), API.allCounsels().catch(() => []), API.allReflections().catch(() => [])]);
-  S.t.entries = en; S.t.counsels = cs; S.t.refls = rf; reindex();
+  const [, en, cs, rf, cf] = await Promise.all([loadPeople(), API.allEntries(), API.allCounsels().catch(() => []), API.allReflections().catch(() => []), API.concernConfig().catch(() => ({}))]);
+  S.t.entries = en; S.t.counsels = cs; S.t.refls = rf; S.t.ccfg = cf || {}; reindex();
 }
 function reindex(){
   const idx = {};
@@ -22,16 +22,52 @@ const isAdmin = () => !!S.me?.is_admin;
 const fmtTime = iso => { if(!iso) return ''; const d = new Date(iso); return d.toLocaleString('ko-KR', {timeZone:'Asia/Seoul', month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit'}); };
 const sLabel = s => `${classOf(s.class_id)?.name.replace('학년 ','-').replace('반','')} ${s.number}번 ${s.name}`;
 
+/* ---------- 살펴볼 학생 기준 ---------- */
+const CONCERN_DEFAULT = { lowTemp:35, lowWeather:4, red:3, yellow:2, window:5, windowLow:3, dropBase:20, dropDays:2, dayDrop:30, missDays:2, baselineMin:5 };
+const CC = () => ({...CONCERN_DEFAULT, ...(S.t.ccfg || {})});
+const repW = e => e?.pm_weather || e?.am_weather || null;                          // 그날의 대표 날씨 (저녁 우선)
+const repT = e => e?.pm_weather ? tempOf(e,'pm') : e?.am_weather ? tempOf(e,'am') : null;
+const isLow = (e, c) => { const w = repW(e), t = repT(e); return w != null && (w >= c.lowWeather || t <= c.lowTemp); };
+
+// 학생 한 명의 D일 기준 살펴볼 이유 → {level:'red'|'yellow'|'gray', tags:[], strip:[]}
 function concernsFor(s, D){
-  const out = [], m = S.t.idx[s.id] || {}, e = m[D], t = todayKST();
-  if(periodDates(classOf(s.class_id)).includes(D) && D <= t && !e?.am_weather) out.push(D === t ? '아침 미기록' : '기록 없음');
-  const c = change(e); if(c && c.d <= -30) out.push('크게 가라앉음');
-  const last = Object.values(m).filter(x => x.entry_date <= D).sort((a,b) => b.entry_date.localeCompare(a.entry_date)).slice(0,3);
-  if(last.length === 3 && last.every(x => (x.pm_weather || x.am_weather) >= 4)) out.push('흐림 3일 연속');
-  const txt = [e?.am_reason, e?.pm_reason, e?.reflection].filter(Boolean).join(' ');
-  if(CONCERN_WORDS.some(w => txt.includes(w))) out.push('이유 살펴보기');
-  if((S.t.counsels||[]).some(c => c.student_id === s.id && ['new','seen'].includes(c.status))) out.push('상담 신청');
-  return out;
+  const c = CC(), m = S.t.idx[s.id] || {}, today = todayKST(), cls = classOf(s.class_id);
+  const pDays = periodDates(cls).filter(d => d <= D);
+  const recs = Object.values(m).filter(x => x.entry_date <= D && repW(x)).sort((a,b) => b.entry_date.localeCompare(a.entry_date));
+  const red = [], yellow = [], gray = [];
+  // 연속으로 낮은 날 (기록 없는 날은 건너뛰고 셈) — 최근 기록이 너무 오래됐으면 제외
+  let streak = 0; for(const r of recs){ if(isLow(r, c)) streak++; else break; }
+  const recentEnough = recs[0] && pDays.slice(-c.window).includes(recs[0].entry_date);
+  if(recentEnough && streak >= c.red) red.push(`마음 낮음 ${streak}일 연속`);
+  else if(recentEnough && streak >= c.yellow) yellow.push(`마음 낮음 ${streak}일 연속`);
+  // 최근 N번 기록 중 M번 낮음 (연속이 아니어도)
+  const lastN = recs.slice(0, c.window);
+  if(recentEnough && streak < c.yellow && lastN.length >= c.windowLow && lastN.filter(r => isLow(r, c)).length >= c.windowLow)
+    yellow.push(`최근 ${lastN.length}번 중 ${lastN.filter(r => isLow(r, c)).length}번 낮음`);
+  // 평소보다 낮음 (그 학생의 이전 기록 평균과 비교)
+  const base = recs.slice(c.dropDays).map(repT).filter(v => v != null);
+  if(recentEnough && base.length >= c.baselineMin && recs.length >= c.dropDays){
+    const b = avg(base), recent = recs.slice(0, c.dropDays).map(repT);
+    if(recent.every(v => v != null && v <= b - c.dropBase)) yellow.push(`평소보다 −${b - avg(recent)}°`);
+  }
+  // 오늘 하루 사이 크게 가라앉음
+  const e = m[D], ch = change(e);
+  if(ch && ch.d <= -c.dayDrop) (repW(e) >= c.lowWeather ? red : yellow).push(`하루 사이 −${-ch.d}°`);
+  // 걱정되는 단어 (최근 3번 기록)
+  const txt = recs.slice(0, 3).map(r => [r.am_reason, r.pm_reason, r.reflection].join(' ')).join(' ');
+  const hit = CONCERN_WORDS.find(w => txt.includes(w));
+  if(hit) red.push('이유 살펴보기');
+  // 상담 신청
+  const cs = (S.t.counsels || []).filter(x => x.student_id === s.id && ['new','seen'].includes(x.status));
+  if(cs.some(x => x.urgency === 'today')) red.push('상담 신청 · 오늘 꼭');
+  else if(cs.length) yellow.push('상담 신청');
+  // 연속 미기록 (오늘은 아직 안 끝났으니 어제까지 셈)
+  let miss = 0; for(const d of [...pDays].reverse()){ if(d === today) continue; if(m[d] && repW(m[d])) break; miss++; }
+  if(miss >= c.missDays) yellow.push(`${miss}일 연속 기록 없음`);
+  if(D === today && pDays.includes(D) && !e?.am_weather) gray.push('오늘 아침 기록 전');
+  const strip = periodDates(cls).filter(d => d <= D).slice(-5).map(d => ({d, w:repW(m[d]), low:m[d] ? isLow(m[d], c) : false}));
+  const level = red.length ? 'red' : yellow.length ? 'yellow' : gray.length ? 'gray' : null;
+  return { level, tags:[...red, ...yellow, ...gray], red, yellow, strip };
 }
 
 function renderTeacher(){
@@ -68,7 +104,12 @@ function tToday(){
   const none = k => rows.filter(r => !r.e?.[k+'_weather']);
   const distCell = (k, w) => { const l = who(k, w); return `<td><div class="dc"><b class="dn">${l.length}</b><div class="nchips">${chips(l)}</div></div></td>`; };
   const byChg = k => rows.filter(r => change(r.e)?.k === k).map(r => ({...r, t:null}));
-  const concerns = studs.map(s => ({ s, c:concernsFor(s, D) })).filter(x => x.c.length);
+  const concerns = studs.map(s => ({ s, c:concernsFor(s, D) })).filter(x => x.c.level);
+  const lv = k => concerns.filter(x => x.c.level === k);
+  const ccItem = x => `<button class="cc lv-${x.c.level}" data-act="student" data-sid="${x.s.id}">
+      <span class="ccn">${esc(sLabel(x.s))}</span>
+      <span class="strip">${x.c.strip.map(t => `<i class="${t.low ? 'low' : ''}" title="${md(t.d)}">${t.w ? WEATHER[t.w].e : '·'}</i>`).join('')}</span>
+      <span class="tags">${[...x.c.red.map(t => `<span class="tag red">${t}</span>`), ...x.c.yellow.map(t => `<span class="tag">${t}</span>`)].join('')}</span></button>`;
   const isPeriod = studs.some(s => periodDates(classOf(s.class_id)).includes(D));
   const dDelta = (amAvg!=null && pmAvg!=null) ? pmAvg - amAvg : null;
 
@@ -90,10 +131,12 @@ function tToday(){
       <p class="muted" style="font-size:12px;margin:8px 0 0">아침·저녁을 모두 기록한 ${ch.length}명 기준 · 마음 온도 10° 이상 차이를 변화로 봐요</p>`
       : '<p class="muted">아침과 저녁을 모두 기록한 학생이 아직 없어요.</p>'}
     </div>
-    <div class="card"><h2>🔎 살펴볼 학생 <span class="muted" style="font-size:14px;font-family:Pretendard">${concerns.length}명</span></h2>
-    ${concerns.length ? `<div class="concern">${concerns.map(x => `<button class="cc" data-act="student" data-sid="${x.s.id}"><b>${esc(sLabel(x.s))}</b>${x.c.map(t => `<span class="tag">${t}</span>`).join('')}</button>`).join('')}</div>
-    <p class="muted" style="font-size:12px;margin:10px 0 0">'이유 살펴보기'는 특정 단어가 포함된 기록이에요. 자동 판단이니 꼭 직접 읽어 보시고, 필요하면 상담 체계와 연계해 주세요.</p>`
-    : '<p class="muted">특별히 살펴볼 학생이 없어요.</p>'}
+    <div class="card"><h2>🔎 살펴볼 학생 <span class="muted" style="font-size:14px;font-family:Pretendard">${lv('red').length + lv('yellow').length}명</span></h2>
+    ${lv('red').length ? `<div class="lvh red">🔴 오늘 꼭 살펴보기 ${lv('red').length}</div><div class="concern">${lv('red').map(ccItem).join('')}</div>` : ''}
+    ${lv('yellow').length ? `<div class="lvh yellow">🟡 관심 갖기 ${lv('yellow').length}</div><div class="concern">${lv('yellow').map(ccItem).join('')}</div>` : ''}
+    ${!lv('red').length && !lv('yellow').length ? '<p class="muted">특별히 살펴볼 학생이 없어요. 😊</p>' : ''}
+    ${lv('gray').length ? `<div class="lvh gray">⚪ 오늘 아침 기록 전 ${lv('gray').length}</div><div class="nchips">${lv('gray').map(x => `<button class="nchip" data-act="student" data-sid="${x.s.id}">${esc(sLabel(x.s))}</button>`).join('')}</div>` : ''}
+    <p class="muted" style="font-size:12px;margin:10px 0 0">작은 날씨 줄은 최근 5일(왼쪽→오른쪽)이에요. 자동 판단이니 꼭 직접 기록을 읽어 보시고, 필요하면 상담 체계와 연계해 주세요. 기준은 ⚙️ 학급 설정에서 바꿀 수 있어요.</p>
     </div>
   </div>
   <div class="card"><h2>🌤️ 마음 날씨 분포 <span class="muted" style="font-size:13px;font-family:Pretendard">이름을 누르면 그 학생의 기록을 볼 수 있어요 · 옆 숫자는 마음 온도</span></h2>
@@ -243,6 +286,24 @@ function tSettings(){
             <div style="display:flex;gap:8px;margin-top:8px"><button class="btn sm" data-act="grad-del-go" style="background:var(--down);border-color:var(--down);color:#fff">네, 모두 삭제합니다</button><button class="btn sm" data-act="grad-del-cancel">취소</button></div></div>`
         : `<p style="margin:8px 0 0"><button class="btn sm" data-act="grad-del-arm">🗑️ 졸업생 기록 모두 삭제</button> <span class="muted" style="font-size:12px">개인정보 보관 기간이 지나면 정리해 주세요.</span></p>`) : ''}</details>` : ''}
   </div>
+  <div class="card"><h2>🔎 살펴볼 학생 기준</h2>
+    <p class="muted" style="font-size:13px;margin-top:-4px">'오늘 한눈에'의 살펴볼 학생을 고르는 기준이에요. 모든 선생님에게 똑같이 적용돼요.</p>
+    <form id="concern-form" class="cgrid">
+      ${(() => { const c = CC(), f = (k, label, unit, min, max) => `<label><span>${label}</span><input type="number" name="${k}" value="${c[k]}" min="${min}" max="${max}" required> ${unit}</label>`;
+        return `<div class="cgh">마음이 낮은 날</div>
+          <label><span>날씨가 이것 이하면</span><select name="lowWeather">${[[3,'☁️ 흐림'],[4,'🌧️ 비'],[5,'⛈️ 천둥']].map(([v,n]) => `<option value="${v}" ${c.lowWeather==v?'selected':''}>${n}</option>`).join('')}</select> 부터</label>
+          ${f('lowTemp','또는 마음 온도가','° 이하', 0, 100)}
+          <div class="cgh">🔴 오늘 꼭 살펴보기</div>
+          ${f('red','낮은 날이 연속','일 이상', 2, 10)}
+          ${f('dayDrop','하루 사이 (저녁이 비·천둥이면서)','° 이상 하락', 10, 100)}
+          <div class="cgh">🟡 관심 갖기</div>
+          ${f('yellow','낮은 날이 연속','일 이상', 1, 10)}
+          ${f('window','최근 기록','번 중', 3, 10)}${f('windowLow','낮은 날이','번 이상', 2, 10)}
+          ${f('dropBase','평소 평균보다','° 이상 낮은 날이', 5, 60)}${f('dropDays','','일 연속', 1, 5)}
+          ${f('missDays','기록 없는 날이 연속','일 이상', 1, 10)}`; })()}
+      <div style="grid-column:1/-1;display:flex;gap:8px;margin-top:6px"><button class="btn sm primary">기준 저장</button><button type="button" class="btn sm" data-act="concern-default">처음 기준으로</button></div>
+    </form>
+  </div>
   <div class="card"><h2>🍎 선생님 목록 <span class="muted" style="font-size:14px;font-family:Pretendard">${S.t.teachers.length}명</span></h2>
     <p class="muted" style="font-size:13px;margin-top:-4px">관리자는 선생님 가입 승인, 관리자 지정, 진급 처리를 할 수 있어요. 일반 선생님은 학생 승인과 기록 보기, 학생 정보 수정을 할 수 있어요.</p>
     ${S.t.teachers.map(t => `<div class="mrow" style="background:#fff;border:1.5px solid var(--line)">
@@ -367,6 +428,7 @@ document.addEventListener('click', async ev => {
     catch(e){ toast(e.message); a.disabled = false; }
     return;
   }
+  if(act === 'concern-default'){ try{ await API.saveConcernConfig({}); S.t.ccfg = {}; renderTeacher(); toast('처음 기준으로 되돌렸어요'); }catch(e){ toast(e.message); } return; }
   if(act === 'cfilter'){ S.t.cfilter[a.dataset.k] = a.dataset.v; return renderTeacher(); }
   if(act === 'print-student'){ const s = S.t.people.find(p => p.id === a.dataset.sid);
     const mine = S.t.entries.filter(e => e.student_id === s.id); closeModal(); return printReport(s, mine, classOf(s.class_id), (S.t.refls||[]).filter(r => r.student_id === s.id)); }
@@ -403,6 +465,13 @@ document.addEventListener('submit', async ev => {
       const inModal = !$('#modal').classList.contains('hidden'), sid = $('#modal [data-act=print-student]')?.dataset.sid;
       renderTeacher(); if(inModal && sid) openStudent(sid); toast(st === 'done' ? '상담 완료로 표시했어요' : '저장했어요'); }
     catch(e){ toast(e.message); }
+    return;
+  }
+  if(f.getAttribute('id') === 'concern-form'){
+    ev.preventDefault();
+    const v = Object.fromEntries(Object.keys(CONCERN_DEFAULT).filter(k => f.elements[k]).map(k => [k, +f.elements[k].value]));
+    if(v.yellow > v.red){ return toast('관심 갖기의 연속 일수는 꼭 살펴보기보다 작아야 해요.'); }
+    try{ await API.saveConcernConfig(v); S.t.ccfg = v; renderTeacher(); toast('기준을 저장했어요'); }catch(e){ toast(e.message); }
     return;
   }
   if(f.getAttribute('id') === 'delete-form'){
