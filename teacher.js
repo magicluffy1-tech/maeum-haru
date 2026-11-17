@@ -147,18 +147,56 @@ function tToday(){
         <td><div class="dc"><b class="dn">${none('pm').length}</b><div class="nchips">${chips(none('pm'))}</div></div></td></tr>
     </tbody></table></div>
   </div>
-  <div class="card"><h2>학생별 기록 · ${fmtDate(D)}</h2>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>학생</th><th>아침</th><th>저녁</th><th>변화</th><th>왜 그런 마음이었나요?</th><th>오늘의 미션</th></tr></thead><tbody>
-    ${rows.map(({s,e}) => { const m = missionOf(e?.mission_id), c = change(e);
-      return `<tr class="click" data-act="student" data-sid="${s.id}">
-        <td style="white-space:nowrap"><b>${esc(s.name)}</b><div class="muted" style="font-size:12px">${classOf(s.class_id)?.name} ${s.number}번</div></td>
-        <td class="w">${e?.am_weather ? WEATHER[e.am_weather].e+`<small>${tempOf(e,'am')}°</small>` : '<span class="muted" style="font-size:14px">–</span>'}</td>
-        <td class="w">${e?.pm_weather ? WEATHER[e.pm_weather].e+`<small>${tempOf(e,'pm')}°</small>` : '<span class="muted" style="font-size:14px">–</span>'}</td>
-        <td>${changeBadge(c)}</td>
-        <td class="why">${e?.am_reason ? `<span class="t">아침</span><div>${esc(e.am_reason)}</div>` : ''}${e?.pm_reason ? `<span class="t">저녁</span><div>${esc(e.pm_reason)}</div>` : ''}${!e?.am_reason && !e?.pm_reason ? '<span class="muted">–</span>' : ''}</td>
-        <td>${m ? `<span class="mtag" style="background:${GROUP[m.grp]}" title="${esc(m.text)}">${esc(m.text)}</span><div style="font-size:12px;margin-top:3px">${e.mission_result ? RESULT[e.mission_result].e+' '+RESULT[e.mission_result].n : e.pledge ? '✍️ 다짐함' : '<span class="muted">다짐 전</span>'}</div>` : '<span class="muted">–</span>'}</td>
-      </tr>`; }).join('')}
-    </tbody></table></div></div>`;
+  ${studentTable(rows, concerns, D)}`;
+}
+
+/* ---------- 학생별 기록 : 학급별 묶음 · 정렬 · 걸러 보기 ---------- */
+function studentTable(rows, concerns, D){
+  const u = S.ui, sort = u.tsort || 'num', flt = u.tfilter || 'all';
+  const lvOf = Object.fromEntries(concerns.map(x => [x.s.id, x.c.level]));
+  const low = e => { const t = e?.pm_weather ? tempOf(e,'pm') : e?.am_weather ? tempOf(e,'am') : null; return t == null ? 999 : t; };
+  const sorters = {
+    num:  (a,b) => a.s.class_id.localeCompare(b.s.class_id) || a.s.number - b.s.number,
+    low:  (a,b) => low(a.e) - low(b.e),
+    chg:  (a,b) => Math.abs(change(b.e)?.d ?? -1) - Math.abs(change(a.e)?.d ?? -1),
+  };
+  const pass = r => flt === 'all' || (flt === 'concern' && ['red','yellow'].includes(lvOf[r.s.id])) || (flt === 'none' && !r.e?.am_weather);
+  const dot = sid => lvOf[sid] === 'red' ? '<span class="ldot red" title="오늘 꼭 살펴보기"></span>' : lvOf[sid] === 'yellow' ? '<span class="ldot yellow" title="관심 갖기"></span>' : '';
+  const tr = ({s,e}) => { const m = missionOf(e?.mission_id), c = change(e);
+    return `<tr class="click" data-act="student" data-sid="${s.id}">
+      <td style="white-space:nowrap"><b>${dot(s.id)}${s.number}. ${esc(s.name)}</b></td>
+      <td class="w">${e?.am_weather ? WEATHER[e.am_weather].e+`<small>${tempOf(e,'am')}°</small>` : '<span class="muted" style="font-size:14px">–</span>'}</td>
+      <td class="w">${e?.pm_weather ? WEATHER[e.pm_weather].e+`<small>${tempOf(e,'pm')}°</small>` : '<span class="muted" style="font-size:14px">–</span>'}</td>
+      <td>${changeBadge(c)}</td>
+      <td class="why">${e?.am_reason ? `<span class="t">아침</span><div>${esc(e.am_reason)}</div>` : ''}${e?.pm_reason ? `<span class="t">저녁</span><div>${esc(e.pm_reason)}</div>` : ''}${!e?.am_reason && !e?.pm_reason ? '<span class="muted">–</span>' : ''}</td>
+      <td>${m ? `<span class="mtag" style="background:${GROUP[m.grp]}" title="${esc(m.text)}">${esc(m.text)}</span><div style="font-size:12px;margin-top:3px">${e.mission_result ? RESULT[e.mission_result].e+' '+RESULT[e.mission_result].n : e.pledge ? '✍️ 다짐함' : '<span class="muted">다짐 전</span>'}</div>` : '<span class="muted">–</span>'}</td>
+    </tr>`; };
+  const table = list => list.length
+    ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>학생</th><th>아침</th><th>저녁</th><th>변화</th><th>왜 그런 마음이었나요?</th><th>오늘의 미션</th></tr></thead><tbody>${list.map(tr).join('')}</tbody></table></div>`
+    : '<p class="muted" style="margin:8px 0">해당하는 학생이 없어요.</p>';
+  const chip = (k, v, label) => `<button class="chip ${(k==='tsort'?sort:flt)===v?'on':''}" data-act="tview" data-k="${k}" data-v="${v}">${label}</button>`;
+  const head = `<div class="card"><div class="tv-head"><h2 style="margin:0">학생별 기록 · ${fmtDate(D)}</h2>
+      <div class="chips">${chip('tsort','num','번호순')}${chip('tsort','low','마음 낮은 순')}${chip('tsort','chg','변화 큰 순')}</div>
+      <div class="chips">${chip('tfilter','all','모두')}${chip('tfilter','concern','🔴🟡 살펴볼 학생')}${chip('tfilter','none','기록 전')}</div></div>`;
+  const shown = rows.filter(pass).sort(sorters[sort]);
+  if(S.t.classId !== 'all') return head + table(shown) + '</div>';
+  // 전체 보기 : 학급별 접히는 묶음
+  const open = u.openCls || (u.openCls = {});
+  const groups = S.classes.map(c => {
+    const all = rows.filter(r => r.s.class_id === c.id); if(!all.length) return '';
+    const list = shown.filter(r => r.s.class_id === c.id);
+    const am = all.filter(r => r.e?.am_weather).length, pm = all.filter(r => r.e?.pm_weather).length;
+    const aT = avg(all.map(r => tempOf(r.e,'am')).filter(v => v != null)), pT = avg(all.map(r => tempOf(r.e,'pm')).filter(v => v != null));
+    const red = all.filter(r => lvOf[r.s.id] === 'red').length, yel = all.filter(r => lvOf[r.s.id] === 'yellow').length;
+    const isOpen = open[c.id] ?? (flt !== 'all');
+    return `<details class="clsgrp" data-cid="${c.id}" ${isOpen ? 'open' : ''}>
+      <summary><b>${c.name}</b><span class="cs">${all.length}명</span>
+        <span class="cs">🌅 ${am}/${all.length}</span><span class="cs">🌇 ${pm}/${all.length}</span>
+        <span class="cs">🌡️ ${aT ?? '–'}° → ${pT ?? '–'}°</span>
+        ${red ? `<span class="cs red">🔴 ${red}</span>` : ''}${yel ? `<span class="cs yellow">🟡 ${yel}</span>` : ''}
+        <span class="cs muted" style="margin-left:auto">${flt !== 'all' ? `${list.length}명 표시` : ''}</span></summary>
+      ${table(list)}</details>`; }).join('');
+  return head + `<p style="margin:4px 0 8px"><button class="btn ghost sm" data-act="cls-all" data-v="1">모두 펼치기</button><button class="btn ghost sm" data-act="cls-all" data-v="0">모두 접기</button></p>${groups}</div>`;
 }
 
 function trendDates(){
@@ -444,6 +482,8 @@ document.addEventListener('click', async ev => {
     return;
   }
   if(act === 'concern-default'){ try{ await API.saveConcernConfig({}); S.t.ccfg = {}; renderTeacher(); toast('처음 기준으로 되돌렸어요'); }catch(e){ toast(e.message); } return; }
+  if(act === 'tview'){ S.ui[a.dataset.k] = a.dataset.v; if(a.dataset.k === 'tfilter') S.ui.openCls = {}; return renderTeacher(); }
+  if(act === 'cls-all'){ S.ui.openCls = Object.fromEntries(S.classes.map(c => [c.id, a.dataset.v === '1'])); return renderTeacher(); }
   if(act === 'mband'){ S.ui.mband = a.dataset.v; return renderTeacher(); }
   if(act === 'mweather'){
     const m = S.missions.find(x => x.id === +a.dataset.id), w = +a.dataset.w, cur = m.weathers || [1,2,3,4,5];
@@ -533,3 +573,9 @@ document.addEventListener('submit', async ev => {
     catch(e){ toast(e.message); }
   }
 });
+
+// 학급 묶음을 펼치거나 접으면 상태 기억 (새로고침·실시간 갱신 때 유지)
+document.addEventListener('toggle', ev => {
+  const d = ev.target; if(!d.classList?.contains('clsgrp')) return;
+  (S.ui.openCls ||= {})[d.dataset.cid] = d.open;
+}, true);
