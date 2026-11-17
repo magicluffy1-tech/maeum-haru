@@ -18,6 +18,12 @@ const C_URGENCY = { today:'오늘 꼭', week:'이번 주 안에', anytime:'편�
 const C_STATUS  = { new:'신청했어요', seen:'선생님이 확인했어요', done:'상담 완료', canceled:'취소했어요' };
 const C_CATS    = ['친구 관계','가족','공부·성적','진로','마음·건강','학교생활','기타'];
 const C_TIMES   = ['아침 조회 전','쉬는 시간','점심시간','방과 후','언제든 괜찮아요'];
+const bandOf = w => !w ? null : w <= 2 ? 'sun' : w === 3 ? 'cloud' : 'rain';
+const BAND = {
+  sun:   {e:'☀️', n:'맑은 마음 나누기', d:'맑은 마음을 주변에 나눠 봐요. 나누면 더 커져요!'},
+  cloud: {e:'☁️', n:'작은 활력 채우기', d:'작은 행동 하나로 마음을 한 칸 맑게 올려 봐요.'},
+  rain:  {e:'🌧️', n:'나를 돌보기',     d:'오늘은 나를 먼저 챙기는 날이에요. 천천히 해도 괜찮아요.'},
+};
 const W_Q = [['best','이번 주, 내 마음이 가장 맑았던 순간은?'],['help','마음이 무거웠을 때 나를 도와준 건 무엇이었나요?'],['next','다음 주의 나에게 한마디']];
 
 /* ===================================================================== 유틸 */
@@ -108,7 +114,8 @@ const RealAPI = {
     }
     return out;
   },
-  async addMission(text, grp){ const max = Math.max(0, ...S.missions.map(m=>m.sort||0)); return chk(await sb.from('missions').insert({text, grp, sort:max+1}).select().single()); },
+  async addMission(text, grp, weathers){ const max = Math.max(0, ...S.missions.map(m=>m.sort||0)); return chk(await sb.from('missions').insert({text, grp, weathers, sort:max+1}).select().single()); },
+  async updateMission(id, f){ chk(await sb.from('missions').update(f).eq('id', id)); },
   async setMissionActive(id, active){ chk(await sb.from('missions').update({active}).eq('id', id)); },
   async updateClass(id, f){ chk(await sb.from('classes').update(f).eq('id', id)); },
   resetPin(id, pin){ return this._rpc('teacher_reset_pin', {p_student:id, p_pin:pin}); },
@@ -135,8 +142,10 @@ const RealAPI = {
 };
 
 /* ===================================================================== 체험 모드(가짜 데이터) */
-function pickMissionLocal(list, missions){
-  const act = missions.filter(m => m.active);
+function pickMissionLocal(list, missions, weather){
+  const all = missions.filter(m => m.active);
+  const fit = all.filter(m => !weather || (m.weathers || [1,2,3,4,5]).includes(weather));
+  const act = fit.length ? fit : all;
   const recent = list.filter(e => e.mission_id).sort((a,b) => b.entry_date.localeCompare(a.entry_date))
     .slice(0, Math.floor(act.length/2)).map(e => e.mission_id);
   const pool = act.filter(m => !recent.includes(m.id));
@@ -148,13 +157,61 @@ function buildDemo(){
   let s = t, n = 0; while(n < 13){ s = addDays(s, -1); const w = dow(s); if(w!==0 && w!==6) n++; }
   const classes = [1,2,3].map(g => ({id:`${g}-1`, grade:g, class_no:1, name:`${g}학년 1반`, start_date:s, total_days:30, include_weekend:false}));
   const missions = [
-    ['대화를 할 때 한 학생의 말을 끝까지 들어보기','green'],['"좋아, 같이 해보자!" 하고 답해보기','green'],
-    ['누군가를 대신 할 수 있는 일을 찾고 실행하기','green'],['눈길이 가는 학생/선생님에게 안부 건네기','green'],
-    ['나와 다른 의견에 "그럴 수도 있겠다"고 말하기','yellow'],['학급의 문제를 함께 해결하는 시간 갖기','yellow'],
-    ['"누가" 대신 "무엇을"로 바꾸어 문제 해결하기','yellow'],['"괜찮아, 그럴 때도 있지" 하고 격려하기','yellow'],
-    ['누군가의 노력을 구체적으로 칭찬하기','purple'],['오늘 내 마음의 온도를 숫자로 표현하기','purple'],
-    ['함께 한 시간에 감사하는 표현하기(전하기)','purple'],['나를 다독이는 짧은 메모로 하루 시작하기','purple'],
-  ].map(([text,grp],i) => ({id:i+1, text, grp, active:true, sort:i+1}));
+    ["대화를 할 때 한 학생의 말을 끝까지 들어보기", "green", [1, 2, 3]],
+    ["\"좋아, 같이 해보자!\" 하고 답해보기", "green", [1, 2, 3]],
+    ["누군가를 대신 할 수 있는 일을 찾고 실행하기", "green", [1, 2]],
+    ["눈길이 가는 학생/선생님에게 안부 건네기", "green", [1, 2, 3]],
+    ["나와 다른 의견에 \"그럴 수도 있겠다\"고 말하기", "yellow", [1, 2, 3]],
+    ["학급의 문제를 함께 해결하는 시간 갖기", "yellow", [1, 2]],
+    ["\"누가\" 대신 \"무엇을\"로 바꾸어 문제 해결하기", "yellow", [1, 2, 3]],
+    ["\"괜찮아, 그럴 때도 있지\" 하고 격려하기", "yellow", [2, 3, 4]],
+    ["누군가의 노력을 구체적으로 칭찬하기", "purple", [1, 2, 3]],
+    ["오늘 내 마음의 온도를 숫자로 표현하기", "purple", [3, 4, 5]],
+    ["함께 한 시간에 감사하는 표현하기(전하기)", "purple", [1, 2, 3]],
+    ["나를 다독이는 짧은 메모로 하루 시작하기", "purple", [3, 4, 5]],
+    ["오늘 기분 좋은 이유를 친구 한 명에게 이야기하기", "yellow", [1, 2]],
+    ["짝꿍에게 먼저 웃으며 인사하기", "yellow", [1, 2]],
+    ["혼자 있는 친구에게 먼저 말 걸어 보기", "yellow", [1, 2]],
+    ["선생님께 \"감사합니다\"를 한 번 더 말하기", "yellow", [1, 2]],
+    ["친구의 좋은 점 한 가지를 찾아 직접 말해 주기", "yellow", [1, 2]],
+    ["모둠 활동에서 다른 친구 의견을 먼저 물어보기", "yellow", [1, 2]],
+    ["교실에서 도움이 필요한 일을 찾아 먼저 하기", "yellow", [1, 2]],
+    ["오늘 좋았던 순간을 기억해 두었다가 저녁에 적기", "yellow", [1, 2]],
+    ["집에 가서 가족에게 오늘 즐거웠던 일 이야기하기", "yellow", [1, 2]],
+    ["친구가 발표할 때 눈을 맞추고 끝까지 들어 주기", "yellow", [1, 2]],
+    ["내가 잘하는 것으로 친구 한 명 도와주기", "yellow", [1, 2]],
+    ["오늘 처음 이야기해 보는 친구와 한마디 나누기", "yellow", [1, 2]],
+    ["급식실에서 \"잘 먹겠습니다\" 하고 인사하기", "yellow", [1, 2]],
+    ["기분 좋은 오늘의 나를 한 문장으로 칭찬하기", "yellow", [1, 2]],
+    ["쉬는 시간에 창밖을 보며 크게 기지개 켜기", "green", [3]],
+    ["점심시간에 5분 걸으며 바깥 공기 마시기", "green", [3]],
+    ["좋아하는 노래 한 곡을 떠올리며 흥얼거리기", "green", [3]],
+    ["물 한 컵을 천천히 마시고 몸에게 \"고마워\" 말하기", "green", [3, 4]],
+    ["친한 친구에게 \"오늘 어때?\" 하고 물어보기", "green", [3]],
+    ["오늘 할 일 중 가장 쉬운 것 하나 먼저 끝내기", "green", [3]],
+    ["오늘 기대되는 일 한 가지 찾아 적어 보기", "green", [3]],
+    ["재미있었던 기억 하나를 친구와 나누기", "green", [3]],
+    ["내 자리 주변을 1분 동안 깨끗하게 정리하기", "green", [3]],
+    ["수업 시간에 한 번 손 들고 말하거나 질문하기", "green", [2, 3]],
+    ["어깨와 목을 천천히 10번 돌리며 몸 풀기", "green", [3, 4]],
+    ["나에게 \"천천히 해도 괜찮아\" 말해 주기", "green", [3, 4]],
+    ["오늘 나를 웃게 한 작은 것 세 가지 찾기", "green", [3]],
+    ["쉬는 시간에 1분 동안 하늘 바라보기", "green", [3, 4]],
+    ["4초 들이쉬고 6초 내쉬는 숨쉬기 5번 하기", "purple", [4, 5]],
+    ["지금 내 마음에 이름 붙여 보기 (속상함·불안함·지침…)", "purple", [4, 5]],
+    ["믿을 수 있는 사람 한 명에게 지금 기분 말하기", "purple", [4, 5]],
+    ["나에게 \"오늘 여기까지 온 것만으로 잘했어\" 말해 주기", "purple", [4, 5]],
+    ["힘든 마음을 종이에 적고 접어서 넣어 두기", "purple", [4, 5]],
+    ["따뜻한 물 한 잔 마시며 잠깐 쉬기", "purple", [4, 5]],
+    ["쉬는 시간에 눈 감고 1분 동안 조용히 쉬기", "purple", [4, 5]],
+    ["내가 좋아하는 장소나 사람을 떠올려 보기", "purple", [4, 5]],
+    ["손을 꼭 쥐었다 펴기를 10번 하며 긴장 풀기", "purple", [4, 5]],
+    ["오늘 하루 중 괜찮았던 순간 하나 찾아보기", "purple", [4, 5]],
+    ["오늘은 할 일 하나만 정해서 해내기", "purple", [4, 5]],
+    ["담임 또는 상담 선생님께 눈인사나 한마디 건네기", "purple", [4, 5]],
+    ["오늘은 일찍 자기로 나와 약속하기", "purple", [4, 5]],
+    ["누군가 나에게 건넨 작은 친절 하나 떠올려 보기", "purple", [4, 5]]
+  ].map(([text,grp,weathers],i) => ({id:i+1, text, grp, weathers, active:true, sort:i+1}));
   const names = ['김하늘','이도윤','박서아','최지호','정하린','강시우','윤채원','장민준','임서연','한예준','오지안','서도현',
                  '신유나','권태오','황수아','안건우','송다인','류은호','전나윤','홍지후','고아린','문하준','양서윤','배로운'];
   const profiles = [{id:'t-1', role:'teacher', login_id:'teacher', name:'담임 선생님', status:'approved', is_admin:true}];
@@ -179,7 +236,7 @@ function buildDemo(){
       if(p.id === 's-2-1-3') pm = clamp(am + pick([0,0,1]));
       const e = { id:id++, student_id:p.id, class_id:p.class_id, entry_date:d,
         am_weather:am, am_temp:Math.max(0,Math.min(100,WEATHER[am].t + Math.round(Math.random()*16-8))), am_reason:pick(AMR[am]), am_at:d+'T08:40:00+09:00',
-        mission_id:pickMissionLocal(list, missions), pledge:null, pm_weather:null, pm_temp:null, pm_reason:null, mission_result:null, reflection:null };
+        mission_id:pickMissionLocal(list, missions, am), pledge:null, pm_weather:null, pm_temp:null, pm_reason:null, mission_result:null, reflection:null };
       if(Math.random() < .85) e.pledge = pick(PLG);
       const evening = isToday ? Math.random() < .3 : Math.random() < .9;
       if(evening){
@@ -234,7 +291,8 @@ const DemoAPI = (() => {
     async missions(){ init(); return structuredClone(db.missions); },
     async myEntries(uid){ return structuredClone(db.entries.filter(e => e.student_id===uid)); },
     async submitMorning(w,t,r){ await wait(); const e = today(true);
-      if(!e.mission_id) e.mission_id = pickMissionLocal(db.entries.filter(x=>x.student_id===me.id && x!==e), db.missions);
+      const fits = id => (db.missions.find(m => m.id===id)?.weathers || [1,2,3,4,5]).includes(w);
+      if(!e.mission_id || (!e.pledge && e.am_weather !== w && !fits(e.mission_id))) e.mission_id = pickMissionLocal(db.entries.filter(x=>x.student_id===me.id && x!==e), db.missions, w);
       Object.assign(e, {am_weather:w, am_temp:t, am_reason:r, am_at:e.am_at||new Date().toISOString()}); return {...e}; },
     async setPledge(p){ await wait(); const e = today(false); if(!e?.mission_id) throw new Error('아침 마음을 먼저 등록해 주세요.'); e.pledge = p; return {...e}; },
     async submitEvening(w,t,r,res,ref){ await wait(); const e = today(true);
@@ -255,7 +313,8 @@ const DemoAPI = (() => {
         else { const n = db.classes.find(x => x.grade===c.grade+1 && x.class_no===c.class_no); if(n){ p.class_id = n.id; up++; } } });
       return `진급 ${up}명, 졸업 ${gr}명`; },
     async allEntries(){ return structuredClone(db.entries); },
-    async addMission(text, grp){ const m = {id:Math.max(...db.missions.map(x=>x.id))+1, text, grp, active:true, sort:db.missions.length+1}; db.missions.push(m); return {...m}; },
+    async addMission(text, grp, weathers){ const m = {id:Math.max(...db.missions.map(x=>x.id))+1, text, grp, weathers, active:true, sort:db.missions.length+1}; db.missions.push(m); return {...m}; },
+    async updateMission(id, f){ Object.assign(db.missions.find(m => m.id===id), f); },
     async setMissionActive(id, a){ db.missions.find(m => m.id===id).active = a; },
     async updateClass(id, f){ Object.assign(db.classes.find(c => c.id===id), f); },
     async resetPin(){ await wait(); },

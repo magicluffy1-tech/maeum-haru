@@ -194,18 +194,33 @@ function tTrend(){
 }
 
 function tMissions(){
-  const ids = new Set(tStudents().map(s => s.id));
+  const ids = new Set(tStudents().map(s => s.id)), f = S.ui.mband || 'all';
   const es = S.t.entries.filter(e => ids.has(e.student_id) && e.mission_id);
-  return `<div class="card"><h2>🍬 마음돌봄 미션</h2>
-    <p class="muted" style="font-size:13px;margin-top:-4px">학생이 아침 마음을 등록하면 켜져 있는 미션 중 하나가 무작위로 주어져요. (최근에 받은 미션은 피해서 골고루)</p>
-    ${S.missions.map(m => { const a = es.filter(e => e.mission_id===m.id), d = a.filter(e => e.mission_result==='done').length;
-      return `<div class="mrow ${m.active?'':'off'}" style="background:${GROUP[m.grp]}"><span class="tx">${esc(m.text)}</span>
-        <span class="st">배정 ${a.length} · 성공 ${a.length ? Math.round(d/a.length*100) : 0}%</span>
+  const stat = m => { const a = es.filter(e => e.mission_id === m.id), d = a.filter(e => e.mission_result === 'done').length;
+    const ch = a.map(change).filter(Boolean); return {n:a.length, rate:a.length ? Math.round(d/a.length*100) : null, lift:ch.length ? avg(ch.map(c => c.d)) : null, nc:ch.length}; };
+  const ws = m => m.weathers || [1,2,3,4,5];
+  const inBand = (m, b) => b === 'all' || ws(m).some(w => bandOf(w) === b);
+  const list = S.missions.filter(m => inBand(m, f));
+  const top = S.missions.map(m => ({m, s:stat(m)})).filter(x => x.s.nc >= 3 && x.s.lift > 0).sort((a,b) => b.s.lift - a.s.lift).slice(0, 5);
+  const chip = (k, label) => `<button class="chip ${f===k?'on':''}" data-act="mband" data-v="${k}">${label}</button>`;
+  return `<div class="card"><h2>🍬 마음돌봄 미션 <span class="muted" style="font-size:14px;font-family:Pretendard">${S.missions.filter(m => m.active).length}개 사용 중</span></h2>
+    <p class="muted" style="font-size:13px;margin-top:-4px">학생이 아침 마음을 등록하면 <b>그 날씨가 켜진 미션</b> 중에서 무작위로 하나가 주어져요. 미션마다 날씨 아이콘을 눌러 켜고 끌 수 있어요.</p>
+    <div class="bandinfo">${Object.entries(BAND).map(([k,b]) => `<div><b>${b.e} ${b.n}</b><span>${k==='sun'?'☀️ 맑음 · 🌤️ 구름 조금':k==='cloud'?'☁️ 흐림':'🌧️ 비 · ⛈️ 천둥'} 날 아침</span></div>`).join('')}</div>
+    ${top.length ? `<div class="toplift"><b>✨ 마음을 가장 맑게 한 미션</b> <span class="muted" style="font-size:12px">(아침→저녁 평균 변화, 3번 이상 기록된 미션)</span>
+      ${top.map((x,i) => `<div>${i+1}. ${esc(x.m.text)} <span class="chg up">▲ ${x.s.lift}°</span></div>`).join('')}</div>` : ''}
+    <div class="chips" style="margin:12px 0 8px">${chip('all','전체')}${chip('sun','☀️ 맑은 마음 나누기')}${chip('cloud','☁️ 작은 활력 채우기')}${chip('rain','🌧️ 나를 돌보기')}</div>
+    ${list.map(m => { const st = stat(m);
+      return `<div class="mrow ${m.active?'':'off'}" style="background:${GROUP[m.grp]}">
+        <span class="tx">${esc(m.text)}<span class="mw">${[1,2,3,4,5].map(w => `<button class="wtog ${ws(m).includes(w)?'on':''}" data-act="mweather" data-id="${m.id}" data-w="${w}" title="${WEATHER[w].n}">${WEATHER[w].e}</button>`).join('')}</span></span>
+        <span class="st">배정 ${st.n} · 성공 ${st.rate ?? '–'}%<br>${st.lift != null ? `마음 변화 ${st.lift > 0 ? '▲' : st.lift < 0 ? '▼' : '＝'}${Math.abs(st.lift)}°` : '마음 변화 –'}</span>
         <label class="switch" title="사용"><input type="checkbox" data-act="mtoggle" data-id="${m.id}" ${m.active?'checked':''}><span></span></label></div>`; }).join('')}
-    <form id="mission-form" style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
-      <input class="inp" name="text" required maxlength="80" placeholder="새 미션 추가 (예: 친구에게 먼저 인사하기)" style="flex:1;min-width:220px">
-      <select class="inp" name="grp" style="width:auto"><option value="green">초록</option><option value="yellow">노랑</option><option value="purple">보라</option></select>
-      <button class="btn primary">추가</button></form></div>`;
+    <form id="mission-form" style="margin-top:14px;border-top:1.5px dashed var(--line);padding-top:12px">
+      <b style="font-size:14px">새 미션 추가</b>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center">
+        <input class="inp" name="text" required maxlength="80" placeholder="예: 친구에게 먼저 인사하기" style="flex:1;min-width:220px">
+        <span class="mw" style="margin:0">${[1,2,3,4,5].map(w => `<label class="wchk"><input type="checkbox" name="w${w}" ${f==='all' || bandOf(w)===f ? 'checked' : ''}><span>${WEATHER[w].e}</span></label>`).join('')}</span>
+        <button class="btn primary">추가</button></div>
+      <p class="muted" style="font-size:12px;margin:6px 0 0">체크한 날씨의 아침에 이 미션이 나올 수 있어요.</p></form></div>`;
 }
 
 function counselCard(c, withName=true){
@@ -429,6 +444,14 @@ document.addEventListener('click', async ev => {
     return;
   }
   if(act === 'concern-default'){ try{ await API.saveConcernConfig({}); S.t.ccfg = {}; renderTeacher(); toast('처음 기준으로 되돌렸어요'); }catch(e){ toast(e.message); } return; }
+  if(act === 'mband'){ S.ui.mband = a.dataset.v; return renderTeacher(); }
+  if(act === 'mweather'){
+    const m = S.missions.find(x => x.id === +a.dataset.id), w = +a.dataset.w, cur = m.weathers || [1,2,3,4,5];
+    const next = cur.includes(w) ? cur.filter(x => x !== w) : [...cur, w].sort();
+    if(!next.length) return toast('날씨를 하나 이상 남겨 주세요.');
+    try{ await API.updateMission(m.id, {weathers:next}); m.weathers = next; renderTeacher(); }catch(e){ toast(e.message); }
+    return;
+  }
   if(act === 'cfilter'){ S.t.cfilter[a.dataset.k] = a.dataset.v; return renderTeacher(); }
   if(act === 'print-student'){ const s = S.t.people.find(p => p.id === a.dataset.sid);
     const mine = S.t.entries.filter(e => e.student_id === s.id); closeModal(); return printReport(s, mine, classOf(s.class_id), (S.t.refls||[]).filter(r => r.student_id === s.id)); }
@@ -486,7 +509,10 @@ document.addEventListener('submit', async ev => {
   if(!['mission-form','reset-form','edit-form'].includes(f.getAttribute('id')) && !f.classList.contains('srow')) return;
   ev.preventDefault();
   if(f.getAttribute('id') === 'mission-form'){
-    try{ const m = await API.addMission(f.text.value.trim(), f.grp.value); S.missions.push(m); renderTeacher(); toast('미션을 추가했어요'); }
+    const ws = [1,2,3,4,5].filter(w => f.elements['w'+w].checked);
+    if(!ws.length) return toast('어울리는 날씨를 하나 이상 골라 주세요.');
+    const grp = ws.every(w => w >= 4) ? 'purple' : ws.every(w => w <= 2) ? 'yellow' : 'green';
+    try{ const m = await API.addMission(f.elements.text.value.trim(), grp, ws); S.missions.push(m); renderTeacher(); toast('미션을 추가했어요'); }
     catch(e){ toast(e.message); }
     return;
   }

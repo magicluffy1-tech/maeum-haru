@@ -45,7 +45,8 @@ function todayHTML(e, inPeriod){
   if(hasAm && e.mission_id && !u.editAm){
     const m = missionOf(e.mission_id);
     h += `<div class="block"><div class="mission" style="background:${GROUP[m?.grp||'green']}">
-      <div class="lbl">🍬 오늘의 마음돌봄 미션</div><div class="mt">${esc(m?.text || '미션')}</div>
+      <div class="lbl">🍬 오늘의 마음돌봄 미션 · ${BAND[bandOf(e.am_weather)].e} ${BAND[bandOf(e.am_weather)].n}</div><div class="mt">${esc(m?.text || '미션')}</div>
+      <div style="font-size:13px;margin:-4px 0 10px;color:rgba(0,0,0,.6)">${BAND[bandOf(e.am_weather)].d}</div>
       ${hasPledge && !u.pledgeOpen ? `<div class="pledge">✍️ <b>나의 다짐</b> ${esc(e.pledge)} ${!hasPm ? '<button class="btn ghost sm" data-act="pledge-open">고치기</button>' : ''}</div>`
         : u.pledgeOpen ? `<form id="pledge-form"><div class="q" style="font-size:14px">이 미션을 오늘 언제, 누구에게, 어떻게 해볼까요?</div>
             <textarea name="pledge" maxlength="300" required placeholder="예: 점심시간에 짝꿍이 발표 준비한 걸 구체적으로 칭찬할게요">${esc(e.pledge||'')}</textarea>
